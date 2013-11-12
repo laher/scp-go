@@ -304,7 +304,11 @@ func scpFromRemote(srcUser, srcHost, srcFile, dstFile string, options ScpOptions
 			}
 		}
 	}()
-	err = session.Run("/usr/bin/scp -qrf " + srcFile)
+	remoteOpts := "-qf";
+	if *options.IsRecursive {
+		remoteOpts += "r"
+	}
+	err = session.Run("/usr/bin/scp "+remoteOpts+" " + srcFile)
 	if err != nil {
 		println("Failed to run remote scp: " + err.Error())
 	}
