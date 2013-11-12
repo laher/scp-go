@@ -59,8 +59,8 @@ func Scp(call []string) error {
 	flagSet := flag.NewFlagSet("scp", flag.ContinueOnError)
 	options.IsRecursive = flagSet.Bool("r", false, "TODO - Recursive copy")
 	options.Port = flagSet.Int("P", 22, "Port number")
-	options.IsRemoteTo = flagSet.Bool("t", false, "Not supported")
-	options.IsRemoteFrom = flagSet.Bool("f", false, "Not supported")
+	options.IsRemoteTo = flagSet.Bool("t", false, "Remote 'to' mode - not currently supported")
+	options.IsRemoteFrom = flagSet.Bool("f", false, "Remote 'from' mode - not currently supported")
 	helpFlag := flagSet.Bool("help", false, "Show this help")
 	err := flagSet.Parse(uggo.Gnuify(call[1:]))
 	if err != nil {
@@ -68,7 +68,7 @@ func Scp(call []string) error {
 		return err
 	}
 	if *options.IsRecursive {
-		return errors.New("This scp does NOT implement 'recursive scp'. Yet.")
+		//return errors.New("This scp does NOT implement 'recursive scp'. Yet.")
 	}
 	if *options.IsRemoteTo || *options.IsRemoteFrom {
 		return errors.New("This scp does NOT implement 'remote scp'. Yet.")
@@ -136,15 +136,20 @@ func sendByte(w io.Writer, val byte) error {
 }
 func scpFromRemote(srcUser, srcHost, srcFile, dstFile string, options ScpOptions) error {
 	dstFileInfo, err := os.Stat(dstFile)
+	dstDir := dstFile
 	if err != nil {
 		if !os.IsNotExist(err) {
 			return err
 		} else {
 			//OK - create
+			
 		}
 	} else if dstFileInfo.IsDir() {
 		//ok - use name of srcFile
-		dstFile = filepath.Join(dstFile, filepath.Base(srcFile))
+		//dstFile = filepath.Join(dstFile, filepath.Base(srcFile))
+		dstDir = dstFile
+	} else {
+		dstDir = filepath.Dir(dstFile)
 	}
 	//from-scp
 	session, err := connect(srcUser, srcHost, *options.Port)
@@ -175,83 +180,128 @@ func scpFromRemote(srcUser, srcHost, srcFile, dstFile string, options ScpOptions
 			return
 		}
 		//defer r.Close()
-		println("Creating destination file ", dstFile)
-		fw, err := os.Create(dstFile)
-		if err != nil {
-			ce <- err
-			println("File creation error: " + err.Error())
-			return
-		}
-		defer fw.Close()
 		scanner := bufio.NewScanner(r)
-		scanner.Scan()
-		err = scanner.Err()
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "Error reading standard input:", err)
-			ce <- err
-			return
-		}
-		cmdFull := scanner.Text()
-		cmd := string(cmdFull[0])
-		parts := strings.Split(cmdFull[1:], " ")
-		fmt.Printf("Received command: %s. Details: %v\n", cmd, parts)
-		if cmd == "C" {
-			mode, err := strconv.ParseInt(parts[0], 8, 32)
+		
+		more := true
+		for more {
+			scanner.Scan()
+			err = scanner.Err()
 			if err != nil {
-				println("Format error: " + err.Error())
+				fmt.Fprintln(os.Stderr, "Error reading standard input:", err)
 				ce <- err
 				return
 			}
-			size, err := strconv.Atoi(parts[1])
-			if err != nil {
-				println("Format error: " + err.Error())
-				ce <- err
+			//first line
+			cmdFull := scanner.Text()
+			//first char
+			cmd := cmdFull[0]
+			//remainder, split by spaces
+			parts := strings.SplitN(cmdFull[1:], " ", 3)
+			fmt.Printf("Received command: %s (%v). Details: %v\n", string(cmd), cmd, cmdFull[1:])
+			if cmd == 0x0 {
+				//continue
+				fmt.Printf("Received OK: %s\n", cmdFull[1:])
+				err = sendByte(cw, 0)
+				if err != nil {
+					println("Write error: " + err.Error())
+					ce <- err
+					return
+				}
+			} else if cmd == 0x1 {
+				fmt.Printf("Received error: %s\n", cmdFull[2:])
+				ce <- errors.New(cmdFull[2:])
+				return
+			} else if cmd == 'D' || cmd == 'C' {
+				mode, err := strconv.ParseInt(parts[0], 8, 32)
+				if err != nil {
+					println("Format error: " + err.Error())
+					ce <- err
+					return
+				}
+				size, err := strconv.Atoi(parts[1])
+				if err != nil {
+					println("Format error: " + err.Error())
+					ce <- err
+					return
+				}
+				filename := parts[2]
+				fmt.Printf("Mode: %d, size: %d, filename: %s\n", mode, size, filename)
+				err = sendByte(cw, 0)
+				if err != nil {
+					println("Write error: " + err.Error())
+					ce <- err
+					return
+				}
+				if cmd == 'C' {
+					thisDstFile := filepath.Join(dstDir, filename)
+					println("Creating destination file: ", thisDstFile)
+					//TODO: mode here
+					fw, err := os.Create(thisDstFile)
+					if err != nil {
+						ce <- err
+						println("File creation error: " + err.Error())
+						return
+					}
+					defer fw.Close()
+
+					//todo - buffer ...
+					b := make([]byte, size)
+					_, err = r.Read(b)
+					if err != nil {
+						println("Read error: " + err.Error())
+						ce <- err
+						return
+					}
+					_, err = fw.Write(b)
+					if err != nil {
+						println("Write error: " + err.Error())
+						ce <- err
+						return
+					}
+					err = fw.Close()
+					if err != nil {
+						println(err.Error())
+						ce <- err
+						return
+					}
+					_, err = cw.Write([]byte{0})
+					if err != nil {
+						println("Write error: " + err.Error())
+						ce <- err
+						return
+					}
+					err = cw.Close()
+					if err != nil {
+						println(err.Error())
+						ce <- err
+						return
+					}
+				} else { //D command (directory)
+					thisDstFile := filepath.Join(dstDir, filename)
+					fileMode := os.FileMode(uint32(mode))
+					err = os.Mkdir(thisDstFile, fileMode)
+					if err != nil {
+						println("Mkdir error: " + err.Error())
+						os.Exit(1)
+						ce <- err
+						return
+					}
+					dstDir = thisDstFile
+				}
+			} else if cmd == 'E' { //E command: go back out of dir
+				dstDir = filepath.Dir(dstDir)
+/*
+				err = sendByte(cw, 0)
+				if err != nil {
+					println("Write error: " + err.Error())
+					ce <- err
+					return
+				}
+*/
+			} else {
+				fmt.Printf("Command '%v' NOT implemented\n", cmd)
 				return
 			}
-			base := parts[2]
-			fmt.Printf("Mode: %d, size: %d, file: %s\n", mode, size, base)
-			err = sendByte(cw, 0)
-			if err != nil {
-				println("Write error: " + err.Error())
-				ce <- err
-				return
-			}
-			//todo - buffer ...
-			b := make([]byte, size)
-			_, err = r.Read(b)
-			if err != nil {
-				println("Read error: " + err.Error())
-				ce <- err
-				return
-			}
-			_, err = fw.Write(b)
-			if err != nil {
-				println("Write error: " + err.Error())
-				ce <- err
-				return
-			}
-			//TODO: chmod here
-			err = fw.Close()
-			if err != nil {
-				println(err.Error())
-				ce <- err
-				return
-			}
-			_, err = cw.Write([]byte{0})
-			if err != nil {
-				println("Write error: " + err.Error())
-				ce <- err
-				return
-			}
-			err = cw.Close()
-			if err != nil {
-				println(err.Error())
-				ce <- err
-				return
-			}
-		} else {
-			fmt.Printf("Command '%s' NOT implemented\n", cmd)
-			return
 		}
 	}()
 	err = session.Run("/usr/bin/scp -qrf " + srcFile)
@@ -310,6 +360,13 @@ func scpToRemote(srcFile, dstUser, dstHost, dstFile string, options ScpOptions) 
 			println(err.Error())
 			ce <- err
 			return
+		}
+	}()
+	go func() {
+		select {
+		case err, ok := <-ce:
+			fmt.Println("Error received", err, ok)
+			os.Exit(1)
 		}
 	}()
 	err = session.Run("/usr/bin/scp -qrt ./")
