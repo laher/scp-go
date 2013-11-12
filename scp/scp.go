@@ -106,7 +106,6 @@ func Scp(call []string) error {
 		}
 		return err
 	} else {
-	
 		srcReader, err := os.Open(srcFile)
 		defer srcReader.Close()
 		if err != nil {
@@ -142,7 +141,6 @@ func scpFromRemote(srcUser, srcHost, srcFile, dstFile string, options ScpOptions
 			return err
 		} else {
 			//OK - create
-			
 		}
 	} else if dstFileInfo.IsDir() {
 		//ok - use name of srcFile
@@ -181,7 +179,6 @@ func scpFromRemote(srcUser, srcHost, srcFile, dstFile string, options ScpOptions
 		}
 		//defer r.Close()
 		scanner := bufio.NewScanner(r)
-		
 		more := true
 		for more {
 			scanner.Scan()
@@ -316,6 +313,44 @@ func scpFromRemote(srcUser, srcHost, srcFile, dstFile string, options ScpOptions
 
 }
 
+
+func sendDir(procWriter io.Writer, mode uint32, srcFile string) error {
+	header := fmt.Sprintf("D%04o 0 %s\n", mode, srcFile)
+	fmt.Printf("Sending: %s\n", header)
+	_, err := procWriter.Write([]byte(header))
+	return err
+}
+
+func sendFile(procWriter io.Writer, mode uint32, srcFile string, srcFileInfo os.FileInfo) error {
+	//single file
+	fileReader, err := os.Open(srcFile)
+	if err != nil {
+		return err
+	}
+	defer fileReader.Close()
+	header := fmt.Sprintf("C%04o %d %s\n", mode, srcFileInfo.Size(), filepath.Base(srcFile))
+	fmt.Printf("Sending: %s\n", header)
+	_, err = procWriter.Write([]byte(header))
+	if err != nil {
+		return err
+	}
+	_, err = io.Copy(procWriter, fileReader)
+	if err != nil {
+		return err
+	}
+	// terminate with null byte
+	err = sendByte(procWriter, 0)
+	if err != nil {
+		return err
+	}
+	fmt.Println("Sent file plus null-byte.")
+	err = fileReader.Close()
+	if err != nil {
+		println(err.Error())
+	}
+	return err
+}
+
 //to-scp
 func scpToRemote(srcFile, dstUser, dstHost, dstFile string, options ScpOptions) error {
 	srcFileInfo, err := os.Stat(srcFile)
@@ -339,27 +374,22 @@ func scpToRemote(srcFile, dstUser, dstHost, dstFile string, options ScpOptions) 
 			return
 		}
 		defer procWriter.Close()
-		fileReader, err := os.Open(srcFile)
-		if err != nil {
-			ce <- err
-			println(err.Error())
-			return
+		mode := uint32(srcFileInfo.Mode().Perm())
+		if *options.IsRecursive {
+			if srcFileInfo.IsDir() {
+				sendDir(procWriter, mode, filepath.Base(srcFile))
+			} else {
+				sendFile(procWriter, mode, filepath.Base(srcFile), srcFileInfo)
+			}
+		} else {
+			if srcFileInfo.IsDir() {
+				ce <- errors.New("Error: Not a regular file")
+				return
+			} else {
+				sendFile(procWriter, mode, filepath.Base(srcFile), srcFileInfo)
+			}
 		}
-		defer fileReader.Close()
-		header := fmt.Sprintf("%s %d %s\n", "C0644", srcFileInfo.Size(), dstFile)
-		fmt.Printf("Sending: %s\n", header)
-		procWriter.Write([]byte(header))
-		io.Copy(procWriter, fileReader)
-		// terminate with null byte
-		err = sendByte(procWriter, 0)
-		fmt.Println("Sent file plus null-byte.")
 		err = procWriter.Close()
-		if err != nil {
-			println(err.Error())
-			ce <- err
-			return
-		}
-		err = fileReader.Close()
 		if err != nil {
 			println(err.Error())
 			ce <- err
@@ -369,11 +399,16 @@ func scpToRemote(srcFile, dstUser, dstHost, dstFile string, options ScpOptions) 
 	go func() {
 		select {
 		case err, ok := <-ce:
-			fmt.Println("Error received", err, ok)
+			fmt.Println("Error:", err, ok)
 			os.Exit(1)
 		}
 	}()
-	err = session.Run("/usr/bin/scp -qrt ./")
+
+	remoteOpts := "-qt";
+	if *options.IsRecursive {
+		remoteOpts += "r"
+	}
+	err = session.Run("/usr/bin/scp "+remoteOpts+" "+dstFile)
 	if err != nil {
 		println("Failed to run remote scp: " + err.Error())
 	}
