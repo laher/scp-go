@@ -105,6 +105,28 @@ func Scp(call []string) error {
 			println("Failed to run 'to-remote' scp: " + err.Error())
 		}
 		return err
+	} else {
+	
+		srcReader, err := os.Open(srcFile)
+		defer srcReader.Close()
+		if err != nil {
+			println("Failed to open local source file ('local-local' scp): " + err.Error())
+			return err
+		}
+		dstWriter, err := os.OpenFile(dstFile, os.O_CREATE | os.O_WRONLY, 0777)
+		defer dstWriter.Close()
+		if err != nil {
+			println("Failed to open local destination file ('local-local' scp): " + err.Error())
+			return err
+		}
+		n, err := io.Copy(dstWriter, srcReader)
+		fmt.Printf("wrote %d bytes\n", n)
+		if err != nil {
+			println("Failed to run 'local-local' copy: " + err.Error())
+			return err
+		}
+		err = dstWriter.Close()
+		return err
 	}
 	return nil
 }
