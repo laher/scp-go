@@ -54,7 +54,7 @@ func parseTarget(target string) (string, string, string, error) {
 func Scp(call []string) error {
 	options := ScpOptions{}
 	flagSet := flag.NewFlagSet("scp", flag.ContinueOnError)
-	options.IsRecursive = flagSet.Bool("r", false, "TODO - Recursive copy")
+	options.IsRecursive = flagSet.Bool("r", false, "Recursive copy")
 	options.Port = flagSet.Int("P", 22, "Port number")
 	options.IsRemoteTo = flagSet.Bool("t", false, "Remote 'to' mode - not currently supported")
 	options.IsRemoteFrom = flagSet.Bool("f", false, "Remote 'from' mode - not currently supported")
