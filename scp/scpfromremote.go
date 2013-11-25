@@ -12,7 +12,6 @@ import (
 	"strings"
 )
 
-
 func scpFromRemote(srcUser, srcHost, srcFile, dstFile string, options ScpOptions) error {
 	dstFileInfo, err := os.Stat(dstFile)
 	dstDir := dstFile
@@ -30,7 +29,7 @@ func scpFromRemote(srcUser, srcHost, srcFile, dstFile string, options ScpOptions
 		dstDir = filepath.Dir(dstFile)
 	}
 	//from-scp
-	session, err := connect(srcUser, srcHost, *options.Port)
+	session, err := connect(srcUser, srcHost, options.Port)
 	if err != nil {
 		return err
 	}
@@ -78,13 +77,13 @@ func scpFromRemote(srcUser, srcHost, srcFile, dstFile string, options ScpOptions
 			if cmd == 0x0 {
 				//continue
 				fmt.Printf("Received OK \n")
-		/*		err = sendByte(cw, 0)
-				if err != nil {
-					println("Write error: " + err.Error())
-					ce <- err
-					return
-				}
-*/
+				/*		err = sendByte(cw, 0)
+						if err != nil {
+							println("Write error: " + err.Error())
+							ce <- err
+							return
+						}
+				*/
 			} else if cmd == 'E' { //E command: go back out of dir
 				dstDir = filepath.Dir(dstDir)
 				fmt.Printf("Received End-Dir\n")
@@ -213,15 +212,17 @@ func scpFromRemote(srcUser, srcHost, srcFile, dstFile string, options ScpOptions
 			return
 		}
 	}()
-	remoteOpts := "-qf";
-	if *options.IsRecursive {
+	remoteOpts := "-f"
+	if options.IsQuiet {
+		remoteOpts += "q"
+	}
+	if options.IsRecursive {
 		remoteOpts += "r"
 	}
-	err = session.Run("/usr/bin/scp "+remoteOpts+" " + srcFile)
+	err = session.Run("/usr/bin/scp " + remoteOpts + " " + srcFile)
 	if err != nil {
 		println("Failed to run remote scp: " + err.Error())
 	}
 	return err
 
 }
-

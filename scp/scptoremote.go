@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 )
 
-
 func processDir(procWriter io.Writer, srcFilePath string, srcFileInfo os.FileInfo) error {
 	err := sendDir(procWriter, srcFilePath, srcFileInfo)
 	if err != nil {
@@ -26,12 +25,12 @@ func processDir(procWriter io.Writer, srcFilePath string, srcFileInfo os.FileInf
 	}
 	for _, fi := range fis {
 		if fi.IsDir() {
-			err = processDir(procWriter, filepath.Join(srcFilePath,fi.Name()), fi)
+			err = processDir(procWriter, filepath.Join(srcFilePath, fi.Name()), fi)
 			if err != nil {
 				return err
 			}
 		} else {
-			err = sendFile(procWriter, filepath.Join(srcFilePath,fi.Name()), fi)
+			err = sendFile(procWriter, filepath.Join(srcFilePath, fi.Name()), fi)
 			if err != nil {
 				return err
 			}
@@ -94,7 +93,7 @@ func scpToRemote(srcFile, dstUser, dstHost, dstFile string, options ScpOptions) 
 	if err != nil {
 		return err
 	}
-	session, err := connect(dstUser, dstHost, *options.Port)
+	session, err := connect(dstUser, dstHost, options.Port)
 	if err != nil {
 		return err
 	}
@@ -111,7 +110,7 @@ func scpToRemote(srcFile, dstUser, dstHost, dstFile string, options ScpOptions) 
 			return
 		}
 		defer procWriter.Close()
-		if *options.IsRecursive {
+		if options.IsRecursive {
 			if srcFileInfo.IsDir() {
 				err = processDir(procWriter, srcFile, srcFileInfo)
 				if err != nil {
@@ -152,14 +151,16 @@ func scpToRemote(srcFile, dstUser, dstHost, dstFile string, options ScpOptions) 
 		}
 	}()
 
-	remoteOpts := "-qt";
-	if *options.IsRecursive {
+	remoteOpts := "-t"
+	if options.IsQuiet {
+		remoteOpts += "q"
+	}
+	if options.IsRecursive {
 		remoteOpts += "r"
 	}
-	err = session.Run("/usr/bin/scp "+remoteOpts+" "+dstFile)
+	err = session.Run("/usr/bin/scp " + remoteOpts + " " + dstFile)
 	if err != nil {
 		println("Failed to run remote scp: " + err.Error())
 	}
 	return err
 }
-

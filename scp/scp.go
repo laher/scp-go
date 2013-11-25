@@ -5,7 +5,6 @@ package scp
 import (
 	"code.google.com/p/go.crypto/ssh"
 	"errors"
-	"flag"
 	"fmt"
 	"github.com/howeyc/gopass"
 	"github.com/laher/uggo"
@@ -15,11 +14,16 @@ import (
 	"strings"
 )
 
+const (
+	VERSION = "0.2.1"
+)
+
 type ScpOptions struct {
-	Port         *int
-	IsRecursive  *bool
-	IsRemoteTo   *bool
-	IsRemoteFrom *bool
+	Port         int
+	IsRecursive  bool
+	IsRemoteTo   bool
+	IsRemoteFrom bool
+	IsQuiet      bool
 }
 
 type clientPassword string
@@ -52,28 +56,29 @@ func parseTarget(target string) (string, string, string, error) {
 }
 
 func Scp(call []string) error {
+	fmt.Fprintf(os.Stderr, "Warning: this scp is incomplete and not currently working with all ssh servers\n")
 	options := ScpOptions{}
-	flagSet := flag.NewFlagSet("scp", flag.ContinueOnError)
-	options.IsRecursive = flagSet.Bool("r", false, "Recursive copy")
-	options.Port = flagSet.Int("P", 22, "Port number")
-	options.IsRemoteTo = flagSet.Bool("t", false, "Remote 'to' mode - not currently supported")
-	options.IsRemoteFrom = flagSet.Bool("f", false, "Remote 'from' mode - not currently supported")
-	helpFlag := flagSet.Bool("help", false, "Show this help")
-	err := flagSet.Parse(uggo.Gnuify(call[1:]))
+	flagSet := uggo.NewFlagSetDefault("scp", "[options] [[user@]host1:]file1 [[user@]host2:]file2", VERSION)
+	flagSet.BoolVar(&options.IsRecursive, "r", false, "Recursive copy")
+	flagSet.IntVar(&options.Port, "P", 22, "Port number")
+	flagSet.BoolVar(&options.IsRemoteTo, "t", false, "Remote 'to' mode - not currently supported")
+	flagSet.BoolVar(&options.IsRemoteFrom, "f", false, "Remote 'from' mode - not currently supported")
+	flagSet.BoolVar(&options.IsQuiet, "q", false, "Quiet mode: disables the progress meter as well as warning and diagnostic messages")
+	err := flagSet.Parse(call[1:])
 	if err != nil {
-		println("Error parsing flags")
+		fmt.Fprintf(os.Stderr, "Flag error:  %v\n\n", err.Error())
+		flagSet.Usage()
 		return err
 	}
-	if *options.IsRecursive {
-		//return errors.New("This scp does NOT implement 'recursive scp'. Yet.")
+	if flagSet.ProcessHelpOrVersion() {
+		return nil
 	}
-	if *options.IsRemoteTo || *options.IsRemoteFrom {
+	if options.IsRemoteTo || options.IsRemoteFrom {
 		return errors.New("This scp does NOT implement 'remote scp'. Yet.")
 	}
 	args := flagSet.Args()
-	if *helpFlag || len(args) != 2 {
-		println("`scp` [options] [[user@]host1:]file1 [[user@]host2:]file2")
-		flagSet.PrintDefaults()
+	if len(args) != 2 {
+		flagSet.Usage()
 		return nil
 	}
 
@@ -109,7 +114,7 @@ func Scp(call []string) error {
 			println("Failed to open local source file ('local-local' scp): " + err.Error())
 			return err
 		}
-		dstWriter, err := os.OpenFile(dstFile, os.O_CREATE | os.O_WRONLY, 0777)
+		dstWriter, err := os.OpenFile(dstFile, os.O_CREATE|os.O_WRONLY, 0777)
 		defer dstWriter.Close()
 		if err != nil {
 			println("Failed to open local destination file ('local-local' scp): " + err.Error())
@@ -130,7 +135,6 @@ func sendByte(w io.Writer, val byte) error {
 	_, err := w.Write([]byte{val})
 	return err
 }
-
 
 func connect(userName, host string, port int) (*ssh.Session, error) {
 	if userName == "" {
