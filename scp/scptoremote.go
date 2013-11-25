@@ -8,10 +8,11 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"time"
 )
 
-func processDir(procWriter io.Writer, srcFilePath string, srcFileInfo os.FileInfo) error {
-	err := sendDir(procWriter, srcFilePath, srcFileInfo)
+func processDir(procWriter io.Writer, srcFilePath string, srcFileInfo os.FileInfo, options ScpOptions) error {
+	err := sendDir(procWriter, srcFilePath, srcFileInfo, options)
 	if err != nil {
 		return err
 	}
@@ -25,38 +26,42 @@ func processDir(procWriter io.Writer, srcFilePath string, srcFileInfo os.FileInf
 	}
 	for _, fi := range fis {
 		if fi.IsDir() {
-			err = processDir(procWriter, filepath.Join(srcFilePath, fi.Name()), fi)
+			err = processDir(procWriter, filepath.Join(srcFilePath,fi.Name()), fi, options)
 			if err != nil {
 				return err
 			}
 		} else {
-			err = sendFile(procWriter, filepath.Join(srcFilePath, fi.Name()), fi)
+			err = sendFile(procWriter, filepath.Join(srcFilePath,fi.Name()), fi, options)
 			if err != nil {
 				return err
 			}
 		}
 	}
 	//TODO process errors
-	err = sendEndDir(procWriter)
+	err = sendEndDir(procWriter, options)
 	return err
 }
 
-func sendEndDir(procWriter io.Writer) error {
+func sendEndDir(procWriter io.Writer, options ScpOptions) error {
 	header := fmt.Sprintf("E\n")
-	fmt.Printf("Sending end dir: %s", header)
+	if options.IsVerbose {
+		fmt.Fprintf(os.Stderr, "Sending end dir: %s", header)
+	}
 	_, err := procWriter.Write([]byte(header))
 	return err
 }
 
-func sendDir(procWriter io.Writer, srcPath string, srcFileInfo os.FileInfo) error {
+func sendDir(procWriter io.Writer, srcPath string, srcFileInfo os.FileInfo, options ScpOptions) error {
 	mode := uint32(srcFileInfo.Mode().Perm())
 	header := fmt.Sprintf("D%04o 0 %s\n", mode, filepath.Base(srcPath))
-	fmt.Printf("Sending Dir header : %s", header)
+	if options.IsVerbose {
+		fmt.Fprintf(os.Stderr, "Sending Dir header : %s", header)
+	}
 	_, err := procWriter.Write([]byte(header))
 	return err
 }
 
-func sendFile(procWriter io.Writer, srcPath string, srcFileInfo os.FileInfo) error {
+func sendFile(procWriter io.Writer, srcPath string, srcFileInfo os.FileInfo, options ScpOptions) error {
 	//single file
 	mode := uint32(srcFileInfo.Mode().Perm())
 	fileReader, err := os.Open(srcPath)
@@ -64,8 +69,18 @@ func sendFile(procWriter io.Writer, srcPath string, srcFileInfo os.FileInfo) err
 		return err
 	}
 	defer fileReader.Close()
-	header := fmt.Sprintf("C%04o %d %s\n", mode, srcFileInfo.Size(), filepath.Base(srcPath))
-	fmt.Printf("Sending File header: %s", header)
+	size  := srcFileInfo.Size()
+	header := fmt.Sprintf("C%04o %d %s\n", mode, size, filepath.Base(srcPath))
+	if options.IsVerbose {
+		fmt.Fprintf(os.Stderr, "Sending File header: %s", header)
+	}
+	format := "\r%s\t\t%d%%\t%dkb\t%0.2fkb/s\t%v"
+	startTime := time.Now()
+	percent := int64(0)
+	spd := float64(0)
+	totTime := startTime.Sub(startTime)
+	tot := int64(0)
+	fmt.Printf(format, srcPath, percent, tot, spd, totTime)
 	_, err = procWriter.Write([]byte(header))
 	if err != nil {
 		return err
@@ -79,48 +94,64 @@ func sendFile(procWriter io.Writer, srcPath string, srcFileInfo os.FileInfo) err
 	if err != nil {
 		return err
 	}
-	fmt.Println("Sent file plus null-byte.")
+
 	err = fileReader.Close()
+	if options.IsVerbose {
+		fmt.Fprintln(os.Stderr, "Sent file plus null-byte.")
+	}
+	tot = size
+	percent = (100 * tot) / size
+	nowTime := time.Now()
+	totTime = nowTime.Sub(startTime)
+	spd = float64(tot/1000) / totTime.Seconds()
+	fmt.Printf(format, srcPath, percent, size, spd, totTime)
+	fmt.Println()
+
 	if err != nil {
-		println(err.Error())
+		fmt.Fprintln(os.Stderr, err.Error())
 	}
 	return err
 }
 
 //to-scp
 func scpToRemote(srcFile, dstUser, dstHost, dstFile string, options ScpOptions) error {
+	
 	srcFileInfo, err := os.Stat(srcFile)
 	if err != nil {
+		fmt.Fprintln(os.Stderr, "Could not stat source file "+srcFile)
 		return err
 	}
 	session, err := connect(dstUser, dstHost, options.Port)
 	if err != nil {
 		return err
+	} else if options.IsVerbose {
+		fmt.Fprintln(os.Stderr, "Got session")
 	}
 	defer session.Close()
 	ce := make(chan error)
 	if dstFile == "" {
 		dstFile = filepath.Base(srcFile)
+		//dstFile = "."
 	}
 	go func() {
 		procWriter, err := session.StdinPipe()
 		if err != nil {
-			println(err.Error())
+			fmt.Fprintln(os.Stderr, err.Error())
 			ce <- err
 			return
 		}
 		defer procWriter.Close()
 		if options.IsRecursive {
 			if srcFileInfo.IsDir() {
-				err = processDir(procWriter, srcFile, srcFileInfo)
+				err = processDir(procWriter, srcFile, srcFileInfo, options)
 				if err != nil {
-					println(err.Error())
+					fmt.Fprintln(os.Stderr, err.Error())
 					ce <- err
 				}
 			} else {
-				err = sendFile(procWriter, srcFile, srcFileInfo)
+				err = sendFile(procWriter, srcFile, srcFileInfo, options)
 				if err != nil {
-					println(err.Error())
+					fmt.Fprintln(os.Stderr, err.Error())
 					ce <- err
 				}
 			}
@@ -129,16 +160,16 @@ func scpToRemote(srcFile, dstUser, dstHost, dstFile string, options ScpOptions) 
 				ce <- errors.New("Error: Not a regular file")
 				return
 			} else {
-				err = sendFile(procWriter, srcFile, srcFileInfo)
+				err = sendFile(procWriter, srcFile, srcFileInfo, options)
 				if err != nil {
-					println(err.Error())
+					fmt.Fprintln(os.Stderr, err.Error())
 					ce <- err
 				}
 			}
 		}
 		err = procWriter.Close()
 		if err != nil {
-			println(err.Error())
+			fmt.Fprintln(os.Stderr, err.Error())
 			ce <- err
 			return
 		}
@@ -146,7 +177,7 @@ func scpToRemote(srcFile, dstUser, dstHost, dstFile string, options ScpOptions) 
 	go func() {
 		select {
 		case err, ok := <-ce:
-			fmt.Println("Error:", err, ok)
+			fmt.Fprintln(os.Stderr, "Error:", err, ok)
 			os.Exit(1)
 		}
 	}()
@@ -160,7 +191,7 @@ func scpToRemote(srcFile, dstUser, dstHost, dstFile string, options ScpOptions) 
 	}
 	err = session.Run("/usr/bin/scp " + remoteOpts + " " + dstFile)
 	if err != nil {
-		println("Failed to run remote scp: " + err.Error())
+		fmt.Fprintln(os.Stderr, "Failed to run remote scp: " + err.Error())
 	}
 	return err
 }

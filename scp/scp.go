@@ -24,6 +24,7 @@ type ScpOptions struct {
 	IsRemoteTo   bool
 	IsRemoteFrom bool
 	IsQuiet      bool
+	IsVerbose bool
 }
 
 type clientPassword string
@@ -64,6 +65,7 @@ func Scp(call []string) error {
 	flagSet.BoolVar(&options.IsRemoteTo, "t", false, "Remote 'to' mode - not currently supported")
 	flagSet.BoolVar(&options.IsRemoteFrom, "f", false, "Remote 'from' mode - not currently supported")
 	flagSet.BoolVar(&options.IsQuiet, "q", false, "Quiet mode: disables the progress meter as well as warning and diagnostic messages")
+	flagSet.BoolVar(&options.IsVerbose, "v", false, "Verbose mode - output differs from normal scp")
 	err := flagSet.Parse(call[1:])
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Flag error:  %v\n\n", err.Error())
@@ -73,6 +75,7 @@ func Scp(call []string) error {
 	if flagSet.ProcessHelpOrVersion() {
 		return nil
 	}
+
 	if options.IsRemoteTo || options.IsRemoteFrom {
 		return errors.New("This scp does NOT implement 'remote scp'. Yet.")
 	}
@@ -84,12 +87,12 @@ func Scp(call []string) error {
 
 	srcFile, srcHost, srcUser, err := parseTarget(args[0])
 	if err != nil {
-		println("Error parsing source")
+		fmt.Fprintln(os.Stderr, os.Stderr, "Error parsing source")
 		return err
 	}
 	dstFile, dstHost, dstUser, err := parseTarget(args[1])
 	if err != nil {
-		println("Error parsing destination")
+		fmt.Fprintln(os.Stderr, os.Stderr, "Error parsing destination")
 		return err
 	}
 	if srcHost != "" && dstHost != "" {
@@ -97,33 +100,33 @@ func Scp(call []string) error {
 	} else if srcHost != "" {
 		err = scpFromRemote(srcUser, srcHost, srcFile, dstFile, options)
 		if err != nil {
-			println("Failed to run 'from-remote' scp: " + err.Error())
+			fmt.Fprintln(os.Stderr, os.Stderr, "Failed to run 'from-remote' scp: " + err.Error())
 		}
 		return err
 
 	} else if dstHost != "" {
 		err = scpToRemote(srcFile, dstUser, dstHost, dstFile, options)
 		if err != nil {
-			println("Failed to run 'to-remote' scp: " + err.Error())
+			fmt.Fprintln(os.Stderr, "Failed to run 'to-remote' scp: " + err.Error())
 		}
 		return err
 	} else {
 		srcReader, err := os.Open(srcFile)
 		defer srcReader.Close()
 		if err != nil {
-			println("Failed to open local source file ('local-local' scp): " + err.Error())
+			fmt.Fprintln(os.Stderr, "Failed to open local source file ('local-local' scp): " + err.Error())
 			return err
 		}
 		dstWriter, err := os.OpenFile(dstFile, os.O_CREATE|os.O_WRONLY, 0777)
 		defer dstWriter.Close()
 		if err != nil {
-			println("Failed to open local destination file ('local-local' scp): " + err.Error())
+			fmt.Fprintln(os.Stderr, "Failed to open local destination file ('local-local' scp): " + err.Error())
 			return err
 		}
 		n, err := io.Copy(dstWriter, srcReader)
 		fmt.Printf("wrote %d bytes\n", n)
 		if err != nil {
-			println("Failed to run 'local-local' copy: " + err.Error())
+			fmt.Fprintln(os.Stderr, "Failed to run 'local-local' copy: " + err.Error())
 			return err
 		}
 		err = dstWriter.Close()
@@ -156,14 +159,12 @@ func connect(userName, host string, port int) (*ssh.Session, error) {
 	target := fmt.Sprintf("%s:%d", host, port)
 	client, err := ssh.Dial("tcp", target, clientConfig)
 	if err != nil {
-		println("Failed to dial: " + err.Error())
+		fmt.Fprintln(os.Stderr, "Failed to dial: " + err.Error())
 		return nil, err
 	}
 	session, err := client.NewSession()
 	if err != nil {
-		println("Failed to create session: " + err.Error())
-	} else {
-		println("Got session")
+		fmt.Fprintln(os.Stderr, "Failed to create session: " + err.Error())
 	}
 	return session, err
 
