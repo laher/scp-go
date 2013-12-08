@@ -31,7 +31,7 @@ func scpFromRemote(srcUser, srcHost, srcFile, dstFile string, options ScpOptions
 		dstDir = filepath.Dir(dstFile)
 	}
 	//from-scp
-	session, err := connect(srcUser, srcHost, options.Port)
+	session, err := connect(srcUser, srcHost, options.Port, options.IsCheckKnownHosts)
 	if err != nil {
 		return err
 	} else if options.IsVerbose {
@@ -47,18 +47,18 @@ func scpFromRemote(srcUser, srcHost, srcFile, dstFile string, options ScpOptions
 			return
 		}
 		defer cw.Close()
+		r, err := session.StdoutPipe()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "session stdout err: " + err.Error() + " continue anyway")
+			ce <- err
+			return
+		}
 		if options.IsVerbose {
 			fmt.Fprintln(os.Stderr, "Sending null byte")
 		}
 		err = sendByte(cw, 0)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "Write error: " + err.Error())
-			ce <- err
-			return
-		}
-		r, err := session.StdoutPipe()
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "session stdout err: " + err.Error())
 			ce <- err
 			return
 		}

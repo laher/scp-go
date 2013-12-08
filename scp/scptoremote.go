@@ -121,7 +121,7 @@ func scpToRemote(srcFile, dstUser, dstHost, dstFile string, options ScpOptions) 
 		fmt.Fprintln(os.Stderr, "Could not stat source file "+srcFile)
 		return err
 	}
-	session, err := connect(dstUser, dstHost, options.Port)
+	session, err := connect(dstUser, dstHost, options.Port, options.IsCheckKnownHosts)
 	if err != nil {
 		return err
 	} else if options.IsVerbose {
