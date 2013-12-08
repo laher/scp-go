@@ -31,7 +31,7 @@ func scpFromRemote(srcUser, srcHost, srcFile, dstFile string, options ScpOptions
 		dstDir = filepath.Dir(dstFile)
 	}
 	//from-scp
-	session, err := connect(srcUser, srcHost, options.Port, options.IsCheckKnownHosts)
+	session, err := connect(srcUser, srcHost, options.Port, options.IsCheckKnownHosts, options.IsVerbose)
 	if err != nil {
 		return err
 	} else if options.IsVerbose {
