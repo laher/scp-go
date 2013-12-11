@@ -162,7 +162,7 @@ func connect(userName, host string, port int, checkKnownHosts bool, verbose bool
 		},
 	}
 	if checkKnownHosts {
-		clientConfig.HostKeyChecker = hostKeyChecker(verbose)
+		clientConfig.HostKeyChecker = loadKnownHosts(verbose)
 	}
 	target := fmt.Sprintf("%s:%d", host, port)
 	client, err := ssh.Dial("tcp", target, clientConfig)
