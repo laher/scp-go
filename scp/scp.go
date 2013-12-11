@@ -36,6 +36,12 @@ func (p clientPassword) Password(user string) (string, error) {
 
 //TODO: error for multiple ats or multiple colons
 func parseTarget(target string) (string, string, string, error) {
+	//treat windows drive refs as local!
+	if strings.Contains(target, ":\\") {
+		if strings.Index(target, ":\\") == 1 {
+			return target, "", "", nil
+		}
+	}
 	if strings.Contains(target, ":") {
 		//remote
 		parts := strings.Split(target, ":")
@@ -58,7 +64,7 @@ func parseTarget(target string) (string, string, string, error) {
 }
 
 func Scp(call []string) error {
-	fmt.Fprintf(os.Stderr, "Warning: this scp is incomplete and not currently working with all ssh servers\n")
+	//fmt.Fprintf(os.Stderr, "Warning: this scp is incomplete and not currently working with all ssh servers\n")
 	options := ScpOptions{}
 	flagSet := uggo.NewFlagSetDefault("scp", "[options] [[user@]host1:]file1 [[user@]host2:]file2", VERSION)
 	flagSet.BoolVar(&options.IsRecursive, "r", false, "Recursive copy")

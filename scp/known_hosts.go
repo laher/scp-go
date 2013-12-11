@@ -32,7 +32,8 @@ func checkHashedHost(knownHost string, host string) error {
 			//hash check
 			//fmt.Printf("|%s|%s|\n", salt, host)
 			saltDecoded, err := base64.StdEncoding.DecodeString(salt)
-			fmt.Printf("%d|% x|\n", len(saltDecoded), saltDecoded)
+			//salt decoded
+			//fmt.Printf("%d|% x|\n", len(saltDecoded), saltDecoded)
 			if err != nil {
 				return err
 			}
@@ -45,24 +46,21 @@ func checkHashedHost(knownHost string, host string) error {
 			//io.WriteString(h, salt)
 			//_, err = io.WriteString(h, host)
 			_, err = h.Write([]byte(host))
-			fmt.Printf("%d|% x|\n", len(host), []byte(host))
+			//fmt.Printf("%d|% x|\n", len(host), []byte(host))
 			if err != nil {
 				return err
 			}
 			out := h.Sum(nil)
-			fmt.Printf("%d|% x|\n", len(out), out)
+			//fmt.Printf("%d|% x|\n", len(out), out)
 			hashed := base64.StdEncoding.EncodeToString(out)
 			//if khkc.verbose {
 			//}
 			if hashed == knownHash {
-				//existingKey = v
-				//hostFound = true
-				fmt.Printf("Matched %s=%s (with salt %s + host %s)\n", hashed, knownHash, salt, host)
+				//fmt.Printf("Matched %s=%s (with salt %s + host %s)\n", hashed, knownHash, salt, host)
 				return nil
 			} else {
-				fmt.Printf("Not Matched %s=%s (with salt %s + host %s)\n", hashed, knownHash, salt, host)
+				//fmt.Printf("Not Matched %s=%s (with salt %s + host %s)\n", hashed, knownHash, salt, host)
 				//ignore line
-				//return errors.New("hash mismatch")
 			}
 		} else {
 			fmt.Printf("Invalid hashed host line\n")
@@ -72,15 +70,19 @@ func checkHashedHost(knownHost string, host string) error {
 	}
 	return errors.New("Not matched")
 }
-func parseWireKey(bs []byte) ssh.PublicKey {
+func parseWireKey(bs []byte, verbose bool) ssh.PublicKey {
 	pk, rest, ok := ssh.ParsePublicKey(bs)
-	fmt.Printf("rest: %v, ok: %v\n", rest, ok)
+	if verbose {
+		fmt.Printf("rest: %v, ok: %v\n", rest, ok)
+	}
 	return pk
 }
 
-func readHostFileKey(bs []byte) ssh.PublicKey {
+func readHostFileKey(bs []byte, verbose bool) ssh.PublicKey {
 	pk, comment, options, rest, ok := ssh.ParseAuthorizedKey(bs)
-	fmt.Printf("comment: %s, options: %v, rest: %v, ok: %v\n", comment, options, rest, ok)
+	if verbose {
+		fmt.Printf("comment: %s, options: %v, rest: %v, ok: %v\n", comment, options, rest, ok)
+	}
 	return pk
 }
 
@@ -93,7 +95,7 @@ func (khkc KnownHostsKeyChecker) matchHostWithHashSupport(host string) ([]byte, 
 			err := checkHashedHost(k, host)
 			if err != nil {
 				//not matching
-				fmt.Printf("checkHashedHost failed")
+				//fmt.Printf("checkHashedHost failed")
 			} else {
 				//, v, hostKey)
 				return v, nil
@@ -115,7 +117,7 @@ func (khkc KnownHostsKeyChecker) Check(addr string, remote net.Addr, algorithm s
 		return errors.New("Key not found. 'add key' not implemented yet in scp-go")
 	}
 
-	existingPublicKey := readHostFileKey(existingKey)
+	existingPublicKey := readHostFileKey(existingKey, khkc.verbose)
 /*
 	splitAt := strings.Index(string(existingKey), " ")
 	existingKeyAlg := string(hostKey[:splitAt])
@@ -123,7 +125,7 @@ func (khkc KnownHostsKeyChecker) Check(addr string, remote net.Addr, algorithm s
 	encodedExistingKey := base64.StdEncoding.EncodeToString(existingKeyVal)
 	encodedHostKey := base64.StdEncoding.EncodeToString(hostKey)
 */
-	hostPublicKey := parseWireKey(hostKey)
+	hostPublicKey := parseWireKey(hostKey, khkc.verbose)
 	existingPKWireFormat := existingPublicKey.Marshal()
 	hostPKWireFormat := hostPublicKey.Marshal()
 	if bytes.Equal(hostPKWireFormat, existingPKWireFormat) {

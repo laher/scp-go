@@ -181,12 +181,13 @@ func scpFromRemote(srcUser, srcHost, srcFile, dstFile string, options ScpOptions
 						if options.IsVerbose {
 							fmt.Fprintln(os.Stderr, "Creating destination file: ", thisDstFile)
 						}
-						format := "\r%s\t\t%d%%\t%dkb\t%0.2fkb/s\t%v"
+						//TODO put kb size into format string
+						format := "\r%s   % 3d %%  %d kb %0.2f kb/s %v      "
 						startTime := time.Now()
-						percent := int64(0)
+						percent := 0
 						spd := float64(0)
 						totTime := startTime.Sub(startTime)
-						tot := int64(0)
+						tot := 0
 						fmt.Printf(format, thisDstFile, percent, tot, spd, totTime)
 
 						//TODO: mode here
@@ -198,26 +199,45 @@ func scpFromRemote(srcUser, srcHost, srcFile, dstFile string, options ScpOptions
 						}
 						defer fw.Close()
 
-						//todo - buffer ...
-						b := make([]byte, size)
-						_, err = r.Read(b)
-						if err != nil {
-							fmt.Fprintln(os.Stderr, "Read error: " + err.Error())
-							ce <- err
-							return
+						//buffered by 4096 bytes
+						bufferSize := 4096
+						lastPercent := 0
+						for tot < size {
+							if bufferSize > size - tot {
+								bufferSize = size - tot
+							}
+							b := make([]byte, bufferSize)
+							n, err = r.Read(b)
+							if err != nil {
+								fmt.Fprintln(os.Stderr, "Read error: " + err.Error())
+								ce <- err
+								return
+							}
+							tot += n
+							//write to file
+							_, err = fw.Write(b[:n])
+							if err != nil {
+								fmt.Fprintln(os.Stderr, "Write error: " + err.Error())
+								ce <- err
+								return
+							}
+							percent = (100 * tot) / size
+							if percent > lastPercent {
+								nowTime := time.Now()
+								totTime = nowTime.Sub(startTime)
+								spd = float64(tot/1000) / totTime.Seconds()
+								fmt.Printf(format, thisDstFile, percent, size, spd, totTime)
+							}
+							lastPercent = percent
 						}
-						_, err = fw.Write(b)
-						if err != nil {
-							fmt.Fprintln(os.Stderr, "Write error: " + err.Error())
-							ce <- err
-							return
-						}
+						//close file writer & check error
 						err = fw.Close()
 						if err != nil {
 							println(err.Error())
 							ce <- err
 							return
 						}
+						//get next byte from channel reader
 						nb := make([]byte, 1)
 						_, err = r.Read(nb)
 						if err != nil {
@@ -225,14 +245,16 @@ func scpFromRemote(srcUser, srcHost, srcFile, dstFile string, options ScpOptions
 							ce <- err
 							return
 						}
+						//TODO check value received in nb
+						//send null-byte back
 						_, err = cw.Write([]byte{0})
 						if err != nil {
 							fmt.Fprintln(os.Stderr, "Send null-byte error: " + err.Error())
 							ce <- err
 							return
 						}
-						tot = int64(size)
-						percent = (100 * tot) / int64(size)
+						tot = size
+						percent = (100 * tot) / size
 						nowTime := time.Now()
 						totTime = nowTime.Sub(startTime)
 						spd = float64(tot/1000) / totTime.Seconds()
