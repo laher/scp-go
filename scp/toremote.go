@@ -26,12 +26,12 @@ func processDir(procWriter io.Writer, srcFilePath string, srcFileInfo os.FileInf
 	}
 	for _, fi := range fis {
 		if fi.IsDir() {
-			err = processDir(procWriter, filepath.Join(srcFilePath,fi.Name()), fi, options)
+			err = processDir(procWriter, filepath.Join(srcFilePath, fi.Name()), fi, options)
 			if err != nil {
 				return err
 			}
 		} else {
-			err = sendFile(procWriter, filepath.Join(srcFilePath,fi.Name()), fi, options)
+			err = sendFile(procWriter, filepath.Join(srcFilePath, fi.Name()), fi, options)
 			if err != nil {
 				return err
 			}
@@ -69,7 +69,7 @@ func sendFile(procWriter io.Writer, srcPath string, srcFileInfo os.FileInfo, opt
 		return err
 	}
 	defer fileReader.Close()
-	size  := srcFileInfo.Size()
+	size := srcFileInfo.Size()
 	header := fmt.Sprintf("C%04o %d %s\n", mode, size, filepath.Base(srcPath))
 	if options.IsVerbose {
 		fmt.Fprintf(os.Stderr, "Sending File header: %s", header)
@@ -115,7 +115,7 @@ func sendFile(procWriter io.Writer, srcPath string, srcFileInfo os.FileInfo, opt
 
 //to-scp
 func scpToRemote(srcFile, dstUser, dstHost, dstFile string, options ScpOptions) error {
-	
+
 	srcFileInfo, err := os.Stat(srcFile)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "Could not stat source file "+srcFile)
@@ -191,7 +191,7 @@ func scpToRemote(srcFile, dstUser, dstHost, dstFile string, options ScpOptions) 
 	}
 	err = session.Run("/usr/bin/scp " + remoteOpts + " " + dstFile)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "Failed to run remote scp: " + err.Error())
+		fmt.Fprintln(os.Stderr, "Failed to run remote scp: "+err.Error())
 	}
 	return err
 }

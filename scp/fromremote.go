@@ -49,7 +49,7 @@ func scpFromRemote(srcUser, srcHost, srcFile, dstFile string, options ScpOptions
 		defer cw.Close()
 		r, err := session.StdoutPipe()
 		if err != nil {
-			fmt.Fprintln(os.Stderr, "session stdout err: " + err.Error() + " continue anyway")
+			fmt.Fprintln(os.Stderr, "session stdout err: "+err.Error()+" continue anyway")
 			ce <- err
 			return
 		}
@@ -58,7 +58,7 @@ func scpFromRemote(srcUser, srcHost, srcFile, dstFile string, options ScpOptions
 		}
 		err = sendByte(cw, 0)
 		if err != nil {
-			fmt.Fprintln(os.Stderr, "Write error: " + err.Error())
+			fmt.Fprintln(os.Stderr, "Write error: "+err.Error())
 			ce <- err
 			return
 		}
@@ -94,13 +94,13 @@ func scpFromRemote(srcUser, srcHost, srcFile, dstFile string, options ScpOptions
 				if options.IsVerbose {
 					fmt.Fprintf(os.Stderr, "Received OK \n")
 				}
-		/*		err = sendByte(cw, 0)
-				if err != nil {
-					fmt.Fprintln(os.Stderr, "Write error: " + err.Error())
-					ce <- err
-					return
-				}
-*/
+				/*		err = sendByte(cw, 0)
+						if err != nil {
+							fmt.Fprintln(os.Stderr, "Write error: " + err.Error())
+							ce <- err
+							return
+						}
+				*/
 			} else if cmd == 'E' { //E command: go back out of dir
 				dstDir = filepath.Dir(dstDir)
 				if options.IsVerbose {
@@ -108,7 +108,7 @@ func scpFromRemote(srcUser, srcHost, srcFile, dstFile string, options ScpOptions
 				}
 				err = sendByte(cw, 0)
 				if err != nil {
-					fmt.Fprintln(os.Stderr, "Write error: " + err.Error())
+					fmt.Fprintln(os.Stderr, "Write error: "+err.Error())
 					ce <- err
 					return
 				}
@@ -120,7 +120,7 @@ func scpFromRemote(srcUser, srcHost, srcFile, dstFile string, options ScpOptions
 
 				err = sendByte(cw, 0)
 				if err != nil {
-					fmt.Fprintln(os.Stderr, "Write error: " + err.Error())
+					fmt.Fprintln(os.Stderr, "Write error: "+err.Error())
 					ce <- err
 					return
 				}
@@ -156,13 +156,13 @@ func scpFromRemote(srcUser, srcHost, srcFile, dstFile string, options ScpOptions
 				} else if cmd == 'D' || cmd == 'C' {
 					mode, err := strconv.ParseInt(parts[0], 8, 32)
 					if err != nil {
-						fmt.Fprintln(os.Stderr, "Format error: " + err.Error())
+						fmt.Fprintln(os.Stderr, "Format error: "+err.Error())
 						ce <- err
 						return
 					}
 					size, err := strconv.Atoi(parts[1])
 					if err != nil {
-						fmt.Fprintln(os.Stderr, "Format error: " + err.Error())
+						fmt.Fprintln(os.Stderr, "Format error: "+err.Error())
 						ce <- err
 						return
 					}
@@ -172,7 +172,7 @@ func scpFromRemote(srcUser, srcHost, srcFile, dstFile string, options ScpOptions
 					}
 					err = sendByte(cw, 0)
 					if err != nil {
-						fmt.Fprintln(os.Stderr, "Send error: " + err.Error())
+						fmt.Fprintln(os.Stderr, "Send error: "+err.Error())
 						ce <- err
 						return
 					}
@@ -194,7 +194,7 @@ func scpFromRemote(srcUser, srcHost, srcFile, dstFile string, options ScpOptions
 						fw, err := os.Create(thisDstFile)
 						if err != nil {
 							ce <- err
-							fmt.Fprintln(os.Stderr, "File creation error: " + err.Error())
+							fmt.Fprintln(os.Stderr, "File creation error: "+err.Error())
 							return
 						}
 						defer fw.Close()
@@ -203,13 +203,13 @@ func scpFromRemote(srcUser, srcHost, srcFile, dstFile string, options ScpOptions
 						bufferSize := 4096
 						lastPercent := 0
 						for tot < size {
-							if bufferSize > size - tot {
+							if bufferSize > size-tot {
 								bufferSize = size - tot
 							}
 							b := make([]byte, bufferSize)
 							n, err = r.Read(b)
 							if err != nil {
-								fmt.Fprintln(os.Stderr, "Read error: " + err.Error())
+								fmt.Fprintln(os.Stderr, "Read error: "+err.Error())
 								ce <- err
 								return
 							}
@@ -217,7 +217,7 @@ func scpFromRemote(srcUser, srcHost, srcFile, dstFile string, options ScpOptions
 							//write to file
 							_, err = fw.Write(b[:n])
 							if err != nil {
-								fmt.Fprintln(os.Stderr, "Write error: " + err.Error())
+								fmt.Fprintln(os.Stderr, "Write error: "+err.Error())
 								ce <- err
 								return
 							}
@@ -249,7 +249,7 @@ func scpFromRemote(srcUser, srcHost, srcFile, dstFile string, options ScpOptions
 						//send null-byte back
 						_, err = cw.Write([]byte{0})
 						if err != nil {
-							fmt.Fprintln(os.Stderr, "Send null-byte error: " + err.Error())
+							fmt.Fprintln(os.Stderr, "Send null-byte error: "+err.Error())
 							ce <- err
 							return
 						}
@@ -266,7 +266,7 @@ func scpFromRemote(srcUser, srcHost, srcFile, dstFile string, options ScpOptions
 						fileMode := os.FileMode(uint32(mode))
 						err = os.MkdirAll(thisDstFile, fileMode)
 						if err != nil {
-							fmt.Fprintln(os.Stderr, "Mkdir error: " + err.Error())
+							fmt.Fprintln(os.Stderr, "Mkdir error: "+err.Error())
 							os.Exit(1)
 							ce <- err
 							return
@@ -295,7 +295,7 @@ func scpFromRemote(srcUser, srcHost, srcFile, dstFile string, options ScpOptions
 	}
 	err = session.Run("/usr/bin/scp " + remoteOpts + " " + srcFile)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "Failed to run remote scp: " + err.Error())
+		fmt.Fprintln(os.Stderr, "Failed to run remote scp: "+err.Error())
 	}
 	return err
 

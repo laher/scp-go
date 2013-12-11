@@ -19,12 +19,12 @@ const (
 )
 
 type ScpOptions struct {
-	Port         int
-	IsRecursive  bool
-	IsRemoteTo   bool
-	IsRemoteFrom bool
-	IsQuiet      bool
-	IsVerbose bool
+	Port              int
+	IsRecursive       bool
+	IsRemoteTo        bool
+	IsRemoteFrom      bool
+	IsQuiet           bool
+	IsVerbose         bool
 	IsCheckKnownHosts bool
 }
 
@@ -108,33 +108,33 @@ func Scp(call []string) error {
 	} else if srcHost != "" {
 		err = scpFromRemote(srcUser, srcHost, srcFile, dstFile, options)
 		if err != nil {
-			fmt.Fprintln(os.Stderr, os.Stderr, "Failed to run 'from-remote' scp: " + err.Error())
+			fmt.Fprintln(os.Stderr, os.Stderr, "Failed to run 'from-remote' scp: "+err.Error())
 		}
 		return err
 
 	} else if dstHost != "" {
 		err = scpToRemote(srcFile, dstUser, dstHost, dstFile, options)
 		if err != nil {
-			fmt.Fprintln(os.Stderr, "Failed to run 'to-remote' scp: " + err.Error())
+			fmt.Fprintln(os.Stderr, "Failed to run 'to-remote' scp: "+err.Error())
 		}
 		return err
 	} else {
 		srcReader, err := os.Open(srcFile)
 		defer srcReader.Close()
 		if err != nil {
-			fmt.Fprintln(os.Stderr, "Failed to open local source file ('local-local' scp): " + err.Error())
+			fmt.Fprintln(os.Stderr, "Failed to open local source file ('local-local' scp): "+err.Error())
 			return err
 		}
 		dstWriter, err := os.OpenFile(dstFile, os.O_CREATE|os.O_WRONLY, 0777)
 		defer dstWriter.Close()
 		if err != nil {
-			fmt.Fprintln(os.Stderr, "Failed to open local destination file ('local-local' scp): " + err.Error())
+			fmt.Fprintln(os.Stderr, "Failed to open local destination file ('local-local' scp): "+err.Error())
 			return err
 		}
 		n, err := io.Copy(dstWriter, srcReader)
 		fmt.Printf("wrote %d bytes\n", n)
 		if err != nil {
-			fmt.Fprintln(os.Stderr, "Failed to run 'local-local' copy: " + err.Error())
+			fmt.Fprintln(os.Stderr, "Failed to run 'local-local' copy: "+err.Error())
 			return err
 		}
 		err = dstWriter.Close()
@@ -146,7 +146,6 @@ func sendByte(w io.Writer, val byte) error {
 	_, err := w.Write([]byte{val})
 	return err
 }
-
 
 //note: shouldn't the password check come after the host key check?
 //Not sure if this is possible with crypto.ssh
@@ -173,12 +172,12 @@ func connect(userName, host string, port int, checkKnownHosts bool, verbose bool
 	target := fmt.Sprintf("%s:%d", host, port)
 	client, err := ssh.Dial("tcp", target, clientConfig)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "Failed to dial: " + err.Error())
+		fmt.Fprintln(os.Stderr, "Failed to dial: "+err.Error())
 		return nil, err
 	}
 	session, err := client.NewSession()
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "Failed to create session: " + err.Error())
+		fmt.Fprintln(os.Stderr, "Failed to create session: "+err.Error())
 	}
 	return session, err
 
