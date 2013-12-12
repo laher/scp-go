@@ -15,7 +15,7 @@ import (
 )
 
 const (
-	VERSION = "0.2.2"
+	VERSION = "0.3.0"
 )
 
 type ScpOptions struct {
@@ -28,15 +28,29 @@ type ScpOptions struct {
 	IsCheckKnownHosts bool
 }
 
-type clientPassword string
+type passwordPrompt struct {
+	userName string
+	host string
+	password string
+}
 
-func (p clientPassword) Password(user string) (string, error) {
-	return string(p), nil
+func (p passwordPrompt) Password(userName string) (string, error) {
+	if userName == "" {
+ 
+		//userName = p.userName
+	} else {
+		p.userName = userName
+	}
+	if p.password == "" {
+		fmt.Printf("%s@%s's password:", p.userName, p.host)
+		p.password = string(gopass.GetPasswd())
+	}
+	return p.password, nil
 }
 
 //TODO: error for multiple ats or multiple colons
 func parseTarget(target string) (string, string, string, error) {
-	//treat windows drive refs as local!
+	//treat windows drive refs as local
 	if strings.Contains(target, ":\\") {
 		if strings.Index(target, ":\\") == 1 {
 			return target, "", "", nil
@@ -150,20 +164,27 @@ func sendByte(w io.Writer, val byte) error {
 //note: shouldn't the password check come after the host key check?
 //Not sure if this is possible with crypto.ssh
 func connect(userName, host string, port int, checkKnownHosts bool, verbose bool) (*ssh.Session, error) {
-	if userName == "" {
-		u, err := user.Current()
-		userName = u.Username
+	keyring := clientKeyring{}
+	errs := keyring.LoadDefaultIdFiles()
+	for _, err := range errs {
 		if err != nil {
-			return nil, err
+			fmt.Fprintln(os.Stderr, "Error loading key file (%v)", err)
 		}
 	}
-	fmt.Printf("%s@%s's password:", userName, host)
-	pass := gopass.GetPasswd()
-	password := clientPassword(pass)
+	if userName == "" { //check 
+		u, err := user.Current()
+		if err != nil {
+			//never mind (probably cross-compiled)
+			//TODO: prompt
+		} else {
+			userName = u.Username
+		}
+	}
 	clientConfig := &ssh.ClientConfig{
 		User: userName,
 		Auth: []ssh.ClientAuth{
-			ssh.ClientAuthPassword(password),
+			ssh.ClientAuthKeyring(keyring),
+			ssh.ClientAuthPassword(passwordPrompt{userName, host, ""}),
 		},
 	}
 	if checkKnownHosts {

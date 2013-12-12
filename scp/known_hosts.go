@@ -30,36 +30,21 @@ func checkHashedHost(knownHost string, host string) error {
 			salt := parts[2]
 			knownHash := parts[3]
 			//hash check
-			//fmt.Printf("|%s|%s|\n", salt, host)
 			saltDecoded, err := base64.StdEncoding.DecodeString(salt)
 			//salt decoded
-			//fmt.Printf("%d|% x|\n", len(saltDecoded), saltDecoded)
 			if err != nil {
 				return err
 			}
 			h := hmac.New(sha1.New, saltDecoded)
-			//h := sha1.New()
-			//_, err = h.Write(saltDecoded)
-			//if err != nil {
-			//	return err
-			//}
-			//io.WriteString(h, salt)
-			//_, err = io.WriteString(h, host)
 			_, err = h.Write([]byte(host))
-			//fmt.Printf("%d|% x|\n", len(host), []byte(host))
 			if err != nil {
 				return err
 			}
 			out := h.Sum(nil)
-			//fmt.Printf("%d|% x|\n", len(out), out)
 			hashed := base64.StdEncoding.EncodeToString(out)
-			//if khkc.verbose {
-			//}
 			if hashed == knownHash {
-				//fmt.Printf("Matched %s=%s (with salt %s + host %s)\n", hashed, knownHash, salt, host)
 				return nil
 			} else {
-				//fmt.Printf("Not Matched %s=%s (with salt %s + host %s)\n", hashed, knownHash, salt, host)
 				//ignore line
 			}
 		} else {
@@ -117,55 +102,17 @@ func (khkc KnownHostsKeyChecker) Check(addr string, remote net.Addr, algorithm s
 	}
 
 	existingPublicKey := readHostFileKey(existingKey, khkc.verbose)
-	/*
-		splitAt := strings.Index(string(existingKey), " ")
-		existingKeyAlg := string(hostKey[:splitAt])
-		existingKeyVal := hostKey[splitAt+1:]
-		encodedExistingKey := base64.StdEncoding.EncodeToString(existingKeyVal)
-		encodedHostKey := base64.StdEncoding.EncodeToString(hostKey)
-	*/
 	hostPublicKey := parseWireKey(hostKey, khkc.verbose)
 	existingPKWireFormat := existingPublicKey.Marshal()
 	hostPKWireFormat := hostPublicKey.Marshal()
 	if bytes.Equal(hostPKWireFormat, existingPKWireFormat) {
-		//if existingPublicKey.Marshal() == hostPublicKey {
-		fmt.Printf("OK keys match")
+		if khkc.verbose {
+			fmt.Printf("OK keys match\n")
+		}
 		return nil
 	} else {
 		return errors.New("Key found but NOT matched!")
 	}
-	/*
-	   	hostKeyVal := hostKey[4:]
-	   		//existingKey = append([]byte{0,0,0,7}, existingKey...)
-	   		fmt.Printf("Key found for host %s.\n", host)
-	   		fmt.Printf("h: %s, e: %s\n", algorithm, existingKeyAlg)
-	   		fmt.Printf("hostKey len: %d\n", len(hostKeyVal))
-	   		fmt.Printf("exisKey len: %d\n", len(existingKeyVal))
-	   		for i, b := range hostKeyVal {
-	   			if len(existingKeyVal) > i {
-	   				if b != existingKeyVal[i] {
-	   //					fmt.Printf("byte %d, thishost: %v, existing: %v\n", i, b, existingKey[i])
-	   			//		return errors.New("Keys do not match!")
-	   				}
-	   			} else {
-	   //				fmt.Printf("byte %d, thishost: %v, existing: nil\n", i, b)
-	   			}
-	   		}
-
-	   		if algorithm != existingKeyAlg {
-	   			return errors.New("Key types do NOT match!\n")
-
-	   		}
-	   		if bytes.Equal(hostKeyVal, existingKeyVal) {
-	   			fmt.Printf("Keys match!\n")
-	   			return nil
-	   		} else {
-	   			fmt.Printf("hostKey: '%s'\n", encodedHostKey)
-	   			fmt.Printf("exisKey: '%s'\n", encodedExistingKey)
-	   			return errors.New("Keys do not match!")
-	   		}
-	*/
-
 }
 
 func loadKnownHosts(verbose bool) KnownHostsKeyChecker {
@@ -226,7 +173,6 @@ func loadKnownHosts(verbose bool) KnownHostsKeyChecker {
 					if verbose {
 						fmt.Printf("Setting %s = %s\n", parts[0], parts[1])
 					}
-					//knownHosts[parts[0]] = append([]byte("ssh-rsa"), pk.Marshal()...)
 					if isRevoked {
 						revokedHosts[parts[0]] = []byte(parts[1])
 					} else if isCa {
@@ -234,7 +180,6 @@ func loadKnownHosts(verbose bool) KnownHostsKeyChecker {
 					} else {
 						knownHosts[parts[0]] = []byte(parts[1])
 					}
-					//knownHosts[parts[0]] =
 				} else {
 					fmt.Printf("Could not decode hostkey %s\n", parts[1])
 				}
