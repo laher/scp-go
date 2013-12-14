@@ -8,7 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"time"
+//	"time"
 )
 
 func processDir(procWriter io.Writer, srcFilePath string, srcFileInfo os.FileInfo, options ScpOptions) error {
@@ -74,17 +74,13 @@ func sendFile(procWriter io.Writer, srcPath string, srcFileInfo os.FileInfo, opt
 	if options.IsVerbose {
 		fmt.Fprintf(os.Stderr, "Sending File header: %s", header)
 	}
-	format := "\r%s\t\t%d%%\t%dkb\t%0.2fkb/s\t%v"
-	startTime := time.Now()
-	percent := int64(0)
-	spd := float64(0)
-	totTime := startTime.Sub(startTime)
-	tot := int64(0)
-	fmt.Printf(format, srcPath, percent, tot, spd, totTime)
+	pb := NewProgressBar(srcPath, size)
+	pb.Update(0)
 	_, err = procWriter.Write([]byte(header))
 	if err != nil {
 		return err
 	}
+	//TODO buffering
 	_, err = io.Copy(procWriter, fileReader)
 	if err != nil {
 		return err
@@ -99,12 +95,7 @@ func sendFile(procWriter io.Writer, srcPath string, srcFileInfo os.FileInfo, opt
 	if options.IsVerbose {
 		fmt.Fprintln(os.Stderr, "Sent file plus null-byte.")
 	}
-	tot = size
-	percent = (100 * tot) / size
-	nowTime := time.Now()
-	totTime = nowTime.Sub(startTime)
-	spd = float64(tot/1000) / totTime.Seconds()
-	fmt.Printf(format, srcPath, percent, size, spd, totTime)
+	pb.Update(size)
 	fmt.Println()
 
 	if err != nil {

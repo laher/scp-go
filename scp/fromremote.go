@@ -11,7 +11,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"time"
 )
 
 func scpFromRemote(srcUser, srcHost, srcFile, dstFile string, options ScpOptions) error {
@@ -21,7 +20,7 @@ func scpFromRemote(srcUser, srcHost, srcFile, dstFile string, options ScpOptions
 		if !os.IsNotExist(err) {
 			return err
 		} else {
-			//OK - create
+			//OK - create file/dir
 		}
 	} else if dstFileInfo.IsDir() {
 		//ok - use name of srcFile
@@ -63,6 +62,7 @@ func scpFromRemote(srcUser, srcHost, srcFile, dstFile string, options ScpOptions
 			return
 		}
 		//defer r.Close()
+		//use a scanner for processing individual commands, but not files themselves
 		scanner := bufio.NewScanner(r)
 		more := true
 		for more {
@@ -89,31 +89,29 @@ func scpFromRemote(srcUser, srcHost, srcFile, dstFile string, options ScpOptions
 			if options.IsVerbose {
 				fmt.Fprintf(os.Stderr, "Sink: %s (%v)\n", string(cmd), cmd)
 			}
-			if cmd == 0x0 {
+			switch cmd {
+			case 0x0:
+			//if cmd == 0x0 {
 				//continue
 				if options.IsVerbose {
 					fmt.Fprintf(os.Stderr, "Received OK \n")
 				}
-				/*		err = sendByte(cw, 0)
-						if err != nil {
-							fmt.Fprintln(os.Stderr, "Write error: " + err.Error())
-							ce <- err
-							return
-						}
-				*/
-			} else if cmd == 'E' { //E command: go back out of dir
+			case 'E':
+			//} else if cmd == 'E' { 
+			//E command: go back out of dir
 				dstDir = filepath.Dir(dstDir)
 				if options.IsVerbose {
 					fmt.Fprintf(os.Stderr, "Received End-Dir\n")
 				}
 				err = sendByte(cw, 0)
 				if err != nil {
-					fmt.Fprintln(os.Stderr, "Write error: "+err.Error())
+					fmt.Fprintln(os.Stderr, "Write error: %s", err.Error())
 					ce <- err
 					return
 				}
-
-			} else if cmd == 0xA { //0xA command: end?
+			case 0xA:
+			//} else if cmd == 0xA { 
+			//0xA command: end?
 				if options.IsVerbose {
 					fmt.Fprintf(os.Stderr, "Received All-done\n")
 				}
@@ -126,7 +124,7 @@ func scpFromRemote(srcUser, srcHost, srcFile, dstFile string, options ScpOptions
 				}
 
 				return
-			} else {
+			default:
 				scanner.Scan()
 				err = scanner.Err()
 				if err != nil {
@@ -149,18 +147,20 @@ func scpFromRemote(srcUser, srcHost, srcFile, dstFile string, options ScpOptions
 				//remainder, split by spaces
 				parts := strings.SplitN(cmdFull, " ", 3)
 
-				if cmd == 0x1 {
+				switch cmd {
+				case 0x1:
 					fmt.Fprintf(os.Stderr, "Received error message: %s\n", cmdFull[1:])
 					ce <- errors.New(cmdFull[1:])
 					return
-				} else if cmd == 'D' || cmd == 'C' {
+				case 'D','C':
 					mode, err := strconv.ParseInt(parts[0], 8, 32)
 					if err != nil {
 						fmt.Fprintln(os.Stderr, "Format error: "+err.Error())
 						ce <- err
 						return
 					}
-					size, err := strconv.Atoi(parts[1])
+					sizeUint, err := strconv.ParseUint(parts[1], 10, 64)
+					size := int64(sizeUint)
 					if err != nil {
 						fmt.Fprintln(os.Stderr, "Format error: "+err.Error())
 						ce <- err
@@ -177,18 +177,14 @@ func scpFromRemote(srcUser, srcHost, srcFile, dstFile string, options ScpOptions
 						return
 					}
 					if cmd == 'C' {
+						//C command - file
 						thisDstFile := filepath.Join(dstDir, filename)
 						if options.IsVerbose {
 							fmt.Fprintln(os.Stderr, "Creating destination file: ", thisDstFile)
 						}
-						//TODO put kb size into format string
-						format := "\r%s   % 3d %%  %d kb %0.2f kb/s %v      "
-						startTime := time.Now()
-						percent := 0
-						spd := float64(0)
-						totTime := startTime.Sub(startTime)
-						tot := 0
-						fmt.Printf(format, thisDstFile, percent, tot, spd, totTime)
+						tot := int64(0)
+						pb := NewProgressBar(filename, size)
+						pb.Update(0)
 
 						//TODO: mode here
 						fw, err := os.Create(thisDstFile)
@@ -200,8 +196,8 @@ func scpFromRemote(srcUser, srcHost, srcFile, dstFile string, options ScpOptions
 						defer fw.Close()
 
 						//buffered by 4096 bytes
-						bufferSize := 4096
-						lastPercent := 0
+						bufferSize := int64(4096)
+						lastPercent := int64(0)
 						for tot < size {
 							if bufferSize > size-tot {
 								bufferSize = size - tot
@@ -213,7 +209,7 @@ func scpFromRemote(srcUser, srcHost, srcFile, dstFile string, options ScpOptions
 								ce <- err
 								return
 							}
-							tot += n
+							tot += int64(n)
 							//write to file
 							_, err = fw.Write(b[:n])
 							if err != nil {
@@ -221,19 +217,16 @@ func scpFromRemote(srcUser, srcHost, srcFile, dstFile string, options ScpOptions
 								ce <- err
 								return
 							}
-							percent = (100 * tot) / size
+							percent := (100 * tot) / size
 							if percent > lastPercent {
-								nowTime := time.Now()
-								totTime = nowTime.Sub(startTime)
-								spd = float64(tot/1000) / totTime.Seconds()
-								fmt.Printf(format, thisDstFile, percent, size, spd, totTime)
+								pb.Update(tot)
 							}
 							lastPercent = percent
 						}
 						//close file writer & check error
 						err = fw.Close()
 						if err != nil {
-							println(err.Error())
+							fmt.Fprintln(os.Stderr, err.Error())
 							ce <- err
 							return
 						}
@@ -253,15 +246,10 @@ func scpFromRemote(srcUser, srcHost, srcFile, dstFile string, options ScpOptions
 							ce <- err
 							return
 						}
-						tot = size
-						percent = (100 * tot) / size
-						nowTime := time.Now()
-						totTime = nowTime.Sub(startTime)
-						spd = float64(tot/1000) / totTime.Seconds()
-						fmt.Printf(format, thisDstFile, percent, size, spd, totTime)
-						fmt.Println()
-
-					} else { //D command (directory)
+						pb.Update(tot)
+						fmt.Println() //new line
+					} else { 
+						//D command (directory)
 						thisDstFile := filepath.Join(dstDir, filename)
 						fileMode := os.FileMode(uint32(mode))
 						err = os.MkdirAll(thisDstFile, fileMode)
@@ -273,7 +261,7 @@ func scpFromRemote(srcUser, srcHost, srcFile, dstFile string, options ScpOptions
 						}
 						dstDir = thisDstFile
 					}
-				} else {
+				default:
 					fmt.Fprintf(os.Stderr, "Command '%v' NOT implemented\n", cmd)
 					return
 				}
