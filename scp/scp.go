@@ -27,6 +27,7 @@ type ScpOptions struct {
 	IsQuiet           bool
 	IsVerbose         bool
 	IsCheckKnownHosts bool
+	KeyFile        string
 }
 
 type passwordPrompt struct {
@@ -89,6 +90,7 @@ func Scp(call []string) error {
 	flagSet.BoolVar(&options.IsQuiet, "q", false, "Quiet mode: disables the progress meter as well as warning and diagnostic messages")
 	flagSet.BoolVar(&options.IsVerbose, "v", false, "Verbose mode - output differs from normal scp")
 	flagSet.BoolVar(&options.IsCheckKnownHosts, "check-known-hosts", false, "Check known hosts - experimental!")
+	flagSet.StringVar(&options.KeyFile, "key-file", "", "Use this keyfile to authenticate")
 	err := flagSet.Parse(call[1:])
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Flag error:  %v\n\n", err.Error())
@@ -157,21 +159,13 @@ func Scp(call []string) error {
 	}
 	return nil
 }
+
 func sendByte(w io.Writer, val byte) error {
 	_, err := w.Write([]byte{val})
 	return err
 }
 
-//note: shouldn't the password check come after the host key check?
-//Not sure if this is possible with crypto.ssh
-func connect(userName, host string, port int, checkKnownHosts bool, verbose bool) (*ssh.Session, error) {
-	keyring := clientKeyring{}
-	errs := keyring.LoadDefaultIdFiles()
-	for _, err := range errs {
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "Error loading key file (%v)", err)
-		}
-	}
+func connect(userName, host string, port int, idFile string, checkKnownHosts bool, verbose bool) (*ssh.Session, error) {
 	if userName == "" { //check 
 		u, err := user.Current()
 		if err != nil {
@@ -181,24 +175,32 @@ func connect(userName, host string, port int, checkKnownHosts bool, verbose bool
 			userName = u.Username
 		}
 	}
-	var auths []ssh.ClientAuth
-	sshAuthSock := os.Getenv("SSH_AUTH_SOCK")
-	if sshAuthSock != "" {
-		if agent, err := net.Dial("unix", sshAuthSock); err == nil {
-			
-			//fmt.Fprintln(os.Stderr, "Connected to agent using ",os.Getenv("SSH_AUTH_SOCK"))
-			auths = append(auths, ssh.ClientAuthAgent(ssh.NewAgentClient(agent)))
+	auths := []ssh.ClientAuth{}
+	if idFile != "" {
+		//load and sign
+		keyring := clientKeyring{}
+		err := keyring.LoadFromPEMFile(idFile)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error loading key file (%v)\n", err)
 		} else {
-			fmt.Fprintln(os.Stderr, "Could not connect to ssh-agent", err)
+			auths = append ( auths, ssh.ClientAuthKeyring(&keyring) )
 		}
 	} else {
-		if verbose {
-			fmt.Fprintln("ssh-agent not available (SSH_AUTH_SOCK is not set)")
+		sshAuthSock := os.Getenv("SSH_AUTH_SOCK")
+		if sshAuthSock != "" {
+			if agentClient, err := net.Dial("unix", sshAuthSock); err == nil {
+				auths = append(auths, ssh.ClientAuthAgent(ssh.NewAgentClient(agentClient)))
+			} else {
+				fmt.Fprintln(os.Stderr, "Could not connect to ssh-agent", err)
+			}
+		} else {
+			if verbose {
+				fmt.Fprintln(os.Stderr, "Did not load ssh-agent because SSH_AUTH_SOCK not available.")
+			}
 		}
 	}
-	
-//	auths = append ( auths, ssh.ClientAuthKeyring(keyring) )
-//	auths = append ( auths, ssh.ClientAuthPassword(passwordPrompt{userName, host, ""}) )
+
+	auths = append ( auths, ssh.ClientAuthPassword(passwordPrompt{userName, host, ""}) )
 	clientConfig := &ssh.ClientConfig{
 		User: userName,
 		Auth: auths,

@@ -7,6 +7,7 @@ import (
 //	"crypto/dsa"
 	"crypto/ecdsa"
 	"crypto/rsa"
+	"github.com/howeyc/gopass"
 	"crypto/x509"
 //	"encoding/base64"
 	"encoding/pem"
@@ -28,7 +29,8 @@ type clientKeyring struct {
         signers []ssh.Signer
 }
 
-func (k clientKeyring) Key(i int) (ssh.PublicKey, error) {
+func (k *clientKeyring) Key(i int) (ssh.PublicKey, error) {
+	//fmt.Println("Getting key number", i)
         if i < 0 || i >= len(k.signers) {
 		//no more keys but no error. Signifies 'try next authenticator'
                 return nil, nil
@@ -36,24 +38,27 @@ func (k clientKeyring) Key(i int) (ssh.PublicKey, error) {
         return k.signers[i].PublicKey(), nil
 }
 
-func (k clientKeyring) Sign(i int, rand io.Reader, data []byte) (sig []byte, err error) {
+func (k *clientKeyring) Sign(i int, rand io.Reader, data []byte) (sig []byte, err error) {
+	//fmt.Println("Signing with key number", i)
 	return k.signers[i].Sign(rand, data)
 }
 
-func (k clientKeyring) LoadRsa(key *rsa.PrivateKey) error {
+func (k *clientKeyring) LoadRsa(key *rsa.PrivateKey) error {
 	return k.load(key)
 }
 
-func (k clientKeyring) LoadEcdsa(key *ecdsa.PrivateKey) error {
+func (k *clientKeyring) LoadEcdsa(key *ecdsa.PrivateKey) error {
 	return k.load(key)
 }
 
-func (k clientKeyring) load(key interface{}) error {
+func (k *clientKeyring) load(key interface{}) error {
 	signer, err := ssh.NewSignerFromKey(key)
 	if err != nil {
 		return err
 	}
+	//fmt.Printf("adding signer from key %+v\n with pub key: %+v\n", key, signer.PublicKey())
 	k.signers = append(k.signers, signer)
+	//fmt.Println("total ", len(k.signers), " signers")
 	return nil
 }
 
@@ -66,10 +71,11 @@ func userDir() string {
 	return u.HomeDir
 }
 
-func (k clientKeyring) LoadIdFiles(files []string) []error {
+func (k *clientKeyring) LoadIdFiles(files []string) []error {
 	errs := []error{}
 	for _, file := range files {
-		err := k.LoadFromPem(file)
+		
+		err := k.LoadFromPEMFile(file)
 		errs = append(errs, err)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error loading file '%s': \n\t%v\n", file, err)
@@ -78,10 +84,12 @@ func (k clientKeyring) LoadIdFiles(files []string) []error {
 	return errs
 }
 
-func (k clientKeyring) LoadDefaultIdFiles() []error {
+//todo: check openssh (ssh-add) source. should there be a glob on the dir?
+func (k *clientKeyring) LoadDefaultIdFiles() []error {
 	files := []string{
 			filepath.Join(userDir(), ".ssh", "id_ecdsa"),
 			filepath.Join(userDir(), ".ssh", "id_rsa"),
+		//	can't get dsa working for now
 		//	filepath.Join(userDir(), ".ssh", "id_dsa")
 		}
 	return k.LoadIdFiles(files)
@@ -102,7 +110,7 @@ func readLines(path string) ([]string, error) {
   return lines, scanner.Err()
 }
 
-func (k clientKeyring) LoadFromPem(file string) error {
+func (k *clientKeyring) LoadFromPEMFile(file string) error {
         filebuf, err := ioutil.ReadFile(file)
         if err != nil {
                 return err
@@ -112,7 +120,14 @@ func (k clientKeyring) LoadFromPem(file string) error {
                 return errors.New("ssh: no key found")
         }
 	if x509.IsEncryptedPEMBlock(block) {
-                return errors.New("password required for key file "+file)
+		fmt.Printf("Password for key '%s':", file)
+		password := gopass.GetPasswd()
+		decrypted, err := x509.DecryptPEMBlock(block, password)
+		if err != nil {
+			return err
+		}
+		//println("decrypted block of type ", block.Type)
+		block.Bytes = decrypted
 	}
 	switch block.Type {
 	case "RSA PRIVATE KEY":
