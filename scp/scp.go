@@ -9,6 +9,7 @@ import (
 	"github.com/howeyc/gopass"
 	"github.com/laher/uggo"
 	"io"
+	"net"
 	"os"
 	"os/user"
 	"strings"
@@ -174,18 +175,33 @@ func connect(userName, host string, port int, checkKnownHosts bool, verbose bool
 	if userName == "" { //check 
 		u, err := user.Current()
 		if err != nil {
-			//never mind (probably cross-compiled)
-			//TODO: prompt
+			//never mind (probably cross-compiled. $USER usually does the trick)
+			userName = os.Getenv("USER")
 		} else {
 			userName = u.Username
 		}
 	}
+	var auths []ssh.ClientAuth
+	sshAuthSock := os.Getenv("SSH_AUTH_SOCK")
+	if sshAuthSock != "" {
+		if agent, err := net.Dial("unix", sshAuthSock); err == nil {
+			
+			//fmt.Fprintln(os.Stderr, "Connected to agent using ",os.Getenv("SSH_AUTH_SOCK"))
+			auths = append(auths, ssh.ClientAuthAgent(ssh.NewAgentClient(agent)))
+		} else {
+			fmt.Fprintln(os.Stderr, "Could not connect to ssh-agent", err)
+		}
+	} else {
+		if verbose {
+			fmt.Fprintln("ssh-agent not available (SSH_AUTH_SOCK is not set)")
+		}
+	}
+	
+//	auths = append ( auths, ssh.ClientAuthKeyring(keyring) )
+//	auths = append ( auths, ssh.ClientAuthPassword(passwordPrompt{userName, host, ""}) )
 	clientConfig := &ssh.ClientConfig{
 		User: userName,
-		Auth: []ssh.ClientAuth{
-			ssh.ClientAuthKeyring(keyring),
-			ssh.ClientAuthPassword(passwordPrompt{userName, host, ""}),
-		},
+		Auth: auths,
 	}
 	if checkKnownHosts {
 		clientConfig.HostKeyChecker = loadKnownHosts(verbose)
