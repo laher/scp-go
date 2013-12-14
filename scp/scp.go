@@ -12,11 +12,12 @@ import (
 	"net"
 	"os"
 	"os/user"
+	"runtime"
 	"strings"
 )
 
 const (
-	VERSION = "0.3.0"
+	VERSION = "0.3.3"
 )
 
 type ScpOptions struct {
@@ -173,6 +174,11 @@ func connect(userName, host string, port int, idFile string, checkKnownHosts boo
 			userName = os.Getenv("USER")
 		} else {
 			userName = u.Username
+			//remove 'domain'
+			if runtime.GOOS == "windows" && strings.Contains(userName, "\\") {
+				parts := strings.Split(userName, "\\")
+				userName = parts[1]
+			}
 		}
 	}
 	auths := []ssh.ClientAuth{}
