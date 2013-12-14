@@ -21,3 +21,9 @@ _cgo_export.*
 _testmain.go
 
 *.exe
+
+#While testing large downloads - do not add!
+*.mp4
+*.mp3
+*.iso
+*.mpeg

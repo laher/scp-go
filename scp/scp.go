@@ -9,13 +9,14 @@ import (
 	"github.com/howeyc/gopass"
 	"github.com/laher/uggo"
 	"io"
+	"net"
 	"os"
 	"os/user"
 	"strings"
 )
 
 const (
-	VERSION = "0.2.2"
+	VERSION = "0.3.0"
 )
 
 type ScpOptions struct {
@@ -26,17 +27,32 @@ type ScpOptions struct {
 	IsQuiet           bool
 	IsVerbose         bool
 	IsCheckKnownHosts bool
+	KeyFile        string
 }
 
-type clientPassword string
+type passwordPrompt struct {
+	userName string
+	host string
+	password string
+}
 
-func (p clientPassword) Password(user string) (string, error) {
-	return string(p), nil
+func (p passwordPrompt) Password(userName string) (string, error) {
+	if userName == "" {
+ 
+		//userName = p.userName
+	} else {
+		p.userName = userName
+	}
+	if p.password == "" {
+		fmt.Printf("%s@%s's password:", p.userName, p.host)
+		p.password = string(gopass.GetPasswd())
+	}
+	return p.password, nil
 }
 
 //TODO: error for multiple ats or multiple colons
 func parseTarget(target string) (string, string, string, error) {
-	//treat windows drive refs as local!
+	//treat windows drive refs as local
 	if strings.Contains(target, ":\\") {
 		if strings.Index(target, ":\\") == 1 {
 			return target, "", "", nil
@@ -74,6 +90,7 @@ func Scp(call []string) error {
 	flagSet.BoolVar(&options.IsQuiet, "q", false, "Quiet mode: disables the progress meter as well as warning and diagnostic messages")
 	flagSet.BoolVar(&options.IsVerbose, "v", false, "Verbose mode - output differs from normal scp")
 	flagSet.BoolVar(&options.IsCheckKnownHosts, "check-known-hosts", false, "Check known hosts - experimental!")
+	flagSet.StringVar(&options.KeyFile, "key-file", "", "Use this keyfile to authenticate")
 	err := flagSet.Parse(call[1:])
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Flag error:  %v\n\n", err.Error())
@@ -142,29 +159,51 @@ func Scp(call []string) error {
 	}
 	return nil
 }
+
 func sendByte(w io.Writer, val byte) error {
 	_, err := w.Write([]byte{val})
 	return err
 }
 
-//note: shouldn't the password check come after the host key check?
-//Not sure if this is possible with crypto.ssh
-func connect(userName, host string, port int, checkKnownHosts bool, verbose bool) (*ssh.Session, error) {
-	if userName == "" {
+func connect(userName, host string, port int, idFile string, checkKnownHosts bool, verbose bool) (*ssh.Session, error) {
+	if userName == "" { //check 
 		u, err := user.Current()
-		userName = u.Username
 		if err != nil {
-			return nil, err
+			//never mind (probably cross-compiled. $USER usually does the trick)
+			userName = os.Getenv("USER")
+		} else {
+			userName = u.Username
 		}
 	}
-	fmt.Printf("%s@%s's password:", userName, host)
-	pass := gopass.GetPasswd()
-	password := clientPassword(pass)
+	auths := []ssh.ClientAuth{}
+	if idFile != "" {
+		//load and sign
+		keyring := clientKeyring{}
+		err := keyring.LoadFromPEMFile(idFile)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error loading key file (%v)\n", err)
+		} else {
+			auths = append ( auths, ssh.ClientAuthKeyring(&keyring) )
+		}
+	} else {
+		sshAuthSock := os.Getenv("SSH_AUTH_SOCK")
+		if sshAuthSock != "" {
+			if agentClient, err := net.Dial("unix", sshAuthSock); err == nil {
+				auths = append(auths, ssh.ClientAuthAgent(ssh.NewAgentClient(agentClient)))
+			} else {
+				fmt.Fprintln(os.Stderr, "Could not connect to ssh-agent", err)
+			}
+		} else {
+			if verbose {
+				fmt.Fprintln(os.Stderr, "Did not load ssh-agent because SSH_AUTH_SOCK not available.")
+			}
+		}
+	}
+
+	auths = append ( auths, ssh.ClientAuthPassword(passwordPrompt{userName, host, ""}) )
 	clientConfig := &ssh.ClientConfig{
 		User: userName,
-		Auth: []ssh.ClientAuth{
-			ssh.ClientAuthPassword(password),
-		},
+		Auth: auths,
 	}
 	if checkKnownHosts {
 		clientConfig.HostKeyChecker = loadKnownHosts(verbose)
