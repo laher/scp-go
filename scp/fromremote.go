@@ -6,6 +6,7 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
+	"github.com/laher/sshutils-go/sshconn"
 	"io"
 	"os"
 	"path/filepath"
@@ -30,7 +31,7 @@ func scpFromRemote(srcUser, srcHost, srcFile, dstFile string, options ScpOptions
 		dstDir = filepath.Dir(dstFile)
 	}
 	//from-scp
-	session, err := connect(srcUser, srcHost, options.Port, options.KeyFile, options.IsCheckKnownHosts, options.IsVerbose)
+	session, err := sshconn.Connect(srcUser, srcHost, options.Port, options.KeyFile, options.IsCheckKnownHosts, options.IsVerbose)
 	if err != nil {
 		return err
 	} else if options.IsVerbose {

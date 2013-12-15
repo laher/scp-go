@@ -3,21 +3,16 @@ package scp
 // thanks to this for inspiration ... https://gist.github.com/jedy/3357393
 
 import (
-	"code.google.com/p/go.crypto/ssh"
 	"errors"
 	"fmt"
-	"github.com/howeyc/gopass"
 	"github.com/laher/uggo"
 	"io"
-	"net"
 	"os"
-	"os/user"
-	"runtime"
 	"strings"
 )
 
 const (
-	VERSION = "0.3.3"
+	VERSION = "0.4.0"
 )
 
 type ScpOptions struct {
@@ -29,26 +24,6 @@ type ScpOptions struct {
 	IsVerbose         bool
 	IsCheckKnownHosts bool
 	KeyFile        string
-}
-
-type passwordPrompt struct {
-	userName string
-	host string
-	password string
-}
-
-func (p passwordPrompt) Password(userName string) (string, error) {
-	if userName == "" {
- 
-		//userName = p.userName
-	} else {
-		p.userName = userName
-	}
-	if p.password == "" {
-		fmt.Printf("%s@%s's password:", p.userName, p.host)
-		p.password = string(gopass.GetPasswd())
-	}
-	return p.password, nil
 }
 
 //TODO: error for multiple ats or multiple colons
@@ -166,64 +141,3 @@ func sendByte(w io.Writer, val byte) error {
 	return err
 }
 
-func connect(userName, host string, port int, idFile string, checkKnownHosts bool, verbose bool) (*ssh.Session, error) {
-	if userName == "" { //check 
-		u, err := user.Current()
-		if err != nil {
-			//never mind (probably cross-compiled. $USER usually does the trick)
-			userName = os.Getenv("USER")
-		} else {
-			userName = u.Username
-			//remove 'domain'
-			if runtime.GOOS == "windows" && strings.Contains(userName, "\\") {
-				parts := strings.Split(userName, "\\")
-				userName = parts[1]
-			}
-		}
-	}
-	auths := []ssh.ClientAuth{}
-	if idFile != "" {
-		//load and sign
-		keyring := clientKeyring{}
-		err := keyring.LoadFromPEMFile(idFile)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error loading key file (%v)\n", err)
-		} else {
-			auths = append ( auths, ssh.ClientAuthKeyring(&keyring) )
-		}
-	} else {
-		sshAuthSock := os.Getenv("SSH_AUTH_SOCK")
-		if sshAuthSock != "" {
-			if agentClient, err := net.Dial("unix", sshAuthSock); err == nil {
-				auths = append(auths, ssh.ClientAuthAgent(ssh.NewAgentClient(agentClient)))
-			} else {
-				fmt.Fprintln(os.Stderr, "Could not connect to ssh-agent", err)
-			}
-		} else {
-			if verbose {
-				fmt.Fprintln(os.Stderr, "Did not load ssh-agent because SSH_AUTH_SOCK not available.")
-			}
-		}
-	}
-
-	auths = append ( auths, ssh.ClientAuthPassword(passwordPrompt{userName, host, ""}) )
-	clientConfig := &ssh.ClientConfig{
-		User: userName,
-		Auth: auths,
-	}
-	if checkKnownHosts {
-		clientConfig.HostKeyChecker = loadKnownHosts(verbose)
-	}
-	target := fmt.Sprintf("%s:%d", host, port)
-	client, err := ssh.Dial("tcp", target, clientConfig)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "Failed to dial: "+err.Error())
-		return nil, err
-	}
-	session, err := client.NewSession()
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "Failed to create session: "+err.Error())
-	}
-	return session, err
-
-}

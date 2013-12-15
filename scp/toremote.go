@@ -5,6 +5,7 @@ package scp
 import (
 	"errors"
 	"fmt"
+	"github.com/laher/sshutils-go/sshconn"
 	"io"
 	"os"
 	"path/filepath"
@@ -112,7 +113,7 @@ func scpToRemote(srcFile, dstUser, dstHost, dstFile string, options ScpOptions) 
 		fmt.Fprintln(os.Stderr, "Could not stat source file "+srcFile)
 		return err
 	}
-	session, err := connect(dstUser, dstHost, options.Port, options.KeyFile, options.IsCheckKnownHosts, options.IsVerbose)
+	session, err := sshconn.Connect(dstUser, dstHost, options.Port, options.KeyFile, options.IsCheckKnownHosts, options.IsVerbose)
 	if err != nil {
 		return err
 	} else if options.IsVerbose {
