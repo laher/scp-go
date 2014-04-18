@@ -15,7 +15,7 @@ const (
 	VERSION = "0.4.0"
 )
 
-type ScpOptions struct {
+type SecureCopier struct {
 	Port              int
 	IsRecursive       bool
 	IsRemoteTo        bool
@@ -24,6 +24,101 @@ type ScpOptions struct {
 	IsVerbose         bool
 	IsCheckKnownHosts bool
 	KeyFile        string
+
+	srcHost string
+	srcUser string
+	srcFile string
+	dstHost string
+	dstUser string
+	dstFile string
+}
+func (scp *SecureCopier) Name() string {
+	return "scp"
+}
+
+//func Scp(call []string) error {
+func (scp *SecureCopier) ParseFlags(call []string, errPipe io.Writer) (error, int) {
+	//fmt.Fprintf(errPipe, "Warning: this scp is incomplete and not currently working with all ssh servers\n")
+	flagSet := uggo.NewFlagSetDefault("scp", "[options] [[user@]host1:]file1 [[user@]host2:]file2", VERSION)
+	flagSet.BoolVar(&scp.IsRecursive, "r", false, "Recursive copy")
+	flagSet.IntVar(&scp.Port, "P", 22, "Port number")
+	flagSet.BoolVar(&scp.IsRemoteTo, "t", false, "Remote 'to' mode - not currently supported")
+	flagSet.BoolVar(&scp.IsRemoteFrom, "f", false, "Remote 'from' mode - not currently supported")
+	flagSet.BoolVar(&scp.IsQuiet, "q", false, "Quiet mode: disables the progress meter as well as warning and diagnostic messages")
+	flagSet.BoolVar(&scp.IsVerbose, "v", false, "Verbose mode - output differs from normal scp")
+	flagSet.BoolVar(&scp.IsCheckKnownHosts, "check-known-hosts", false, "Check known hosts - experimental!")
+	flagSet.StringVar(&scp.KeyFile, "key-file", "", "Use this keyfile to authenticate")
+	err, code := flagSet.ParsePlus(call[1:])
+	if err != nil {
+		return err, code
+	}
+	if scp.IsRemoteTo || scp.IsRemoteFrom {
+		return errors.New("This scp does NOT implement 'remote-remote scp'. Yet."), 1
+	}
+	args := flagSet.Args()
+	if len(args) != 2 {
+		flagSet.Usage()
+		return errors.New("Not enough args"), 1
+	}
+
+	scp.srcFile, scp.srcHost, scp.srcUser, err = parseTarget(args[0])
+	if err != nil {
+		fmt.Fprintln(errPipe, "Error parsing source")
+		return err, 1
+	}
+	scp.dstFile, scp.dstHost, scp.dstUser, err = parseTarget(args[1])
+	if err != nil {
+		fmt.Fprintln(errPipe, "Error parsing destination")
+		return err, 1
+	}
+	return nil, 0
+}
+
+func (scp *SecureCopier) Exec(inPipe io.Reader, outPipe io.Writer, errPipe io.Writer) (error, int) {
+	if scp.srcHost != "" && scp.dstHost != "" {
+		return errors.New("remote->remote NOT implemented (yet)!"), 1
+	} else if scp.srcHost != "" {
+		err := scp.scpFromRemote(scp.srcUser, scp.srcHost, scp.srcFile, scp.dstFile, inPipe, outPipe, errPipe)
+		if err != nil {
+			fmt.Fprintln(errPipe, errPipe, "Failed to run 'from-remote' scp: "+err.Error())
+			return err, 1
+		}
+		return nil, 0
+
+	} else if scp.dstHost != "" {
+		err := scp.scpToRemote(scp.srcFile, scp.dstUser, scp.dstHost, scp.dstFile, outPipe, errPipe)
+		if err != nil {
+			fmt.Fprintln(errPipe, "Failed to run 'to-remote' scp: "+err.Error())
+			return err, 1
+		}
+		return nil, 0
+	} else {
+		srcReader, err := os.Open(scp.srcFile)
+		defer srcReader.Close()
+		if err != nil {
+			fmt.Fprintln(errPipe, "Failed to open local source file ('local-local' scp): "+err.Error())
+			return err, 1
+		}
+		dstWriter, err := os.OpenFile(scp.dstFile, os.O_CREATE|os.O_WRONLY, 0777)
+		defer dstWriter.Close()
+		if err != nil {
+			fmt.Fprintln(errPipe, "Failed to open local destination file ('local-local' scp): "+err.Error())
+			return err, 1
+		}
+		n, err := io.Copy(dstWriter, srcReader)
+		fmt.Fprintf(errPipe, "wrote %d bytes\n", n)
+		if err != nil {
+			fmt.Fprintln(errPipe, "Failed to run 'local-local' copy: "+err.Error())
+			return err, 1
+		}
+		err = dstWriter.Close()
+		if err != nil {
+			fmt.Fprintln(errPipe, "Failed to close local destination: "+err.Error())
+			return err, 1
+		}
+
+	}
+	return nil, 0
 }
 
 //TODO: error for multiple ats or multiple colons
@@ -55,86 +150,6 @@ func parseTarget(target string) (string, string, string, error) {
 	}
 }
 
-func Scp(call []string) error {
-	//fmt.Fprintf(os.Stderr, "Warning: this scp is incomplete and not currently working with all ssh servers\n")
-	options := ScpOptions{}
-	flagSet := uggo.NewFlagSetDefault("scp", "[options] [[user@]host1:]file1 [[user@]host2:]file2", VERSION)
-	flagSet.BoolVar(&options.IsRecursive, "r", false, "Recursive copy")
-	flagSet.IntVar(&options.Port, "P", 22, "Port number")
-	flagSet.BoolVar(&options.IsRemoteTo, "t", false, "Remote 'to' mode - not currently supported")
-	flagSet.BoolVar(&options.IsRemoteFrom, "f", false, "Remote 'from' mode - not currently supported")
-	flagSet.BoolVar(&options.IsQuiet, "q", false, "Quiet mode: disables the progress meter as well as warning and diagnostic messages")
-	flagSet.BoolVar(&options.IsVerbose, "v", false, "Verbose mode - output differs from normal scp")
-	flagSet.BoolVar(&options.IsCheckKnownHosts, "check-known-hosts", false, "Check known hosts - experimental!")
-	flagSet.StringVar(&options.KeyFile, "key-file", "", "Use this keyfile to authenticate")
-	err := flagSet.Parse(call[1:])
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Flag error:  %v\n\n", err.Error())
-		flagSet.Usage()
-		return err
-	}
-	if flagSet.ProcessHelpOrVersion() {
-		return nil
-	}
-
-	if options.IsRemoteTo || options.IsRemoteFrom {
-		return errors.New("This scp does NOT implement 'remote scp'. Yet.")
-	}
-	args := flagSet.Args()
-	if len(args) != 2 {
-		flagSet.Usage()
-		return nil
-	}
-
-	srcFile, srcHost, srcUser, err := parseTarget(args[0])
-	if err != nil {
-		fmt.Fprintln(os.Stderr, os.Stderr, "Error parsing source")
-		return err
-	}
-	dstFile, dstHost, dstUser, err := parseTarget(args[1])
-	if err != nil {
-		fmt.Fprintln(os.Stderr, os.Stderr, "Error parsing destination")
-		return err
-	}
-	if srcHost != "" && dstHost != "" {
-		return errors.New("remote->remote NOT implemented (yet)!")
-	} else if srcHost != "" {
-		err = scpFromRemote(srcUser, srcHost, srcFile, dstFile, options)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, os.Stderr, "Failed to run 'from-remote' scp: "+err.Error())
-		}
-		return err
-
-	} else if dstHost != "" {
-		err = scpToRemote(srcFile, dstUser, dstHost, dstFile, options)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "Failed to run 'to-remote' scp: "+err.Error())
-		}
-		return err
-	} else {
-		srcReader, err := os.Open(srcFile)
-		defer srcReader.Close()
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "Failed to open local source file ('local-local' scp): "+err.Error())
-			return err
-		}
-		dstWriter, err := os.OpenFile(dstFile, os.O_CREATE|os.O_WRONLY, 0777)
-		defer dstWriter.Close()
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "Failed to open local destination file ('local-local' scp): "+err.Error())
-			return err
-		}
-		n, err := io.Copy(dstWriter, srcReader)
-		fmt.Printf("wrote %d bytes\n", n)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "Failed to run 'local-local' copy: "+err.Error())
-			return err
-		}
-		err = dstWriter.Close()
-		return err
-	}
-	return nil
-}
 
 func sendByte(w io.Writer, val byte) error {
 	_, err := w.Write([]byte{val})

@@ -17,8 +17,13 @@ type ProgressBar struct {
 	Size int64
 }
 
+func NewProgressBarTo(subject string, size int64, outPipe io.Writer) ProgressBar {
+	return ProgressBar{outPipe, DEFAULT_FORMAT, subject, time.Now(), size}
+}
+
+
 func NewProgressBar(subject string, size int64) ProgressBar {
-	return ProgressBar{os.Stdout, DEFAULT_FORMAT, subject, time.Now(), size}
+	return NewProgressBarTo(subject, size, os.Stdout)
 }
 
 func (pb ProgressBar) Update(tot int64) {

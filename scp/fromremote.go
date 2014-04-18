@@ -14,51 +14,58 @@ import (
 	"strings"
 )
 
-func scpFromRemote(srcUser, srcHost, srcFile, dstFile string, options ScpOptions) error {
+// scp FROM remote source
+func (scp *SecureCopier) scpFromRemote(srcUser, srcHost, srcFile, dstFile string, inPipe io.Reader, outPipe io.Writer, errPipe io.Writer) error {
 	dstFileInfo, err := os.Stat(dstFile)
 	dstDir := dstFile
+	var useSpecifiedFilename bool
 	if err != nil {
 		if !os.IsNotExist(err) {
 			return err
 		} else {
 			//OK - create file/dir
+			useSpecifiedFilename = true
 		}
 	} else if dstFileInfo.IsDir() {
 		//ok - use name of srcFile
 		//dstFile = filepath.Join(dstFile, filepath.Base(srcFile))
 		dstDir = dstFile
+		//MUST use received filename instead
+		//TODO should this be from USR?
+		useSpecifiedFilename = false
 	} else {
 		dstDir = filepath.Dir(dstFile)
+		useSpecifiedFilename = true
 	}
 	//from-scp
-	session, err := sshconn.Connect(srcUser, srcHost, options.Port, options.KeyFile, options.IsCheckKnownHosts, options.IsVerbose)
+	session, err := sshconn.Connect(srcUser, srcHost, scp.Port, scp.KeyFile, scp.IsCheckKnownHosts, scp.IsVerbose, errPipe)
 	if err != nil {
 		return err
-	} else if options.IsVerbose {
-		fmt.Fprintln(os.Stderr, "Got session")
+	} else if scp.IsVerbose {
+		fmt.Fprintln(errPipe, "Got session")
 	}
 	defer session.Close()
 	ce := make(chan error)
 	go func() {
 		cw, err := session.StdinPipe()
 		if err != nil {
-			fmt.Fprintln(os.Stderr, err.Error())
+			fmt.Fprintln(errPipe, err.Error())
 			ce <- err
 			return
 		}
 		defer cw.Close()
 		r, err := session.StdoutPipe()
 		if err != nil {
-			fmt.Fprintln(os.Stderr, "session stdout err: "+err.Error()+" continue anyway")
+			fmt.Fprintln(errPipe, "session stdout err: "+err.Error()+" continue anyway")
 			ce <- err
 			return
 		}
-		if options.IsVerbose {
-			fmt.Fprintln(os.Stderr, "Sending null byte")
+		if scp.IsVerbose {
+			fmt.Fprintln(errPipe, "Sending null byte")
 		}
 		err = sendByte(cw, 0)
 		if err != nil {
-			fmt.Fprintln(os.Stderr, "Write error: "+err.Error())
+			fmt.Fprintln(errPipe, "Write error: "+err.Error())
 			ce <- err
 			return
 		}
@@ -66,60 +73,58 @@ func scpFromRemote(srcUser, srcHost, srcFile, dstFile string, options ScpOptions
 		//use a scanner for processing individual commands, but not files themselves
 		scanner := bufio.NewScanner(r)
 		more := true
+		first := true
 		for more {
 			cmdArr := make([]byte, 1)
 			n, err := r.Read(cmdArr)
 			if err != nil {
 				if err == io.EOF {
 					//no problem.
-					if options.IsVerbose {
-						fmt.Fprintln(os.Stderr, "Received EOF from remote server")
+					if scp.IsVerbose {
+						fmt.Fprintln(errPipe, "Received EOF from remote server")
 					}
 				} else {
-					fmt.Fprintln(os.Stderr, "Error reading standard input:", err)
+					fmt.Fprintln(errPipe, "Error reading standard input:", err)
 					ce <- err
 				}
 				return
 			}
 			if n < 1 {
-				fmt.Fprintln(os.Stderr, "Error reading next byte from standard input")
+				fmt.Fprintln(errPipe, "Error reading next byte from standard input")
 				ce <- errors.New("Error reading next byte from standard input")
 				return
 			}
 			cmd := cmdArr[0]
-			if options.IsVerbose {
-				fmt.Fprintf(os.Stderr, "Sink: %s (%v)\n", string(cmd), cmd)
+			if scp.IsVerbose {
+				fmt.Fprintf(errPipe, "Sink: %s (%v)\n", string(cmd), cmd)
 			}
 			switch cmd {
 			case 0x0:
-			//if cmd == 0x0 {
 				//continue
-				if options.IsVerbose {
-					fmt.Fprintf(os.Stderr, "Received OK \n")
+				if scp.IsVerbose {
+					fmt.Fprintf(errPipe, "Received OK \n")
 				}
 			case 'E':
-			//} else if cmd == 'E' { 
 			//E command: go back out of dir
 				dstDir = filepath.Dir(dstDir)
-				if options.IsVerbose {
-					fmt.Fprintf(os.Stderr, "Received End-Dir\n")
+				if scp.IsVerbose {
+					fmt.Fprintf(errPipe, "Received End-Dir\n")
 				}
 				err = sendByte(cw, 0)
 				if err != nil {
-					fmt.Fprintln(os.Stderr, "Write error: %s", err.Error())
+					fmt.Fprintln(errPipe, "Write error: %s", err.Error())
 					ce <- err
 					return
 				}
 			case 0xA:
-			//} else if cmd == 0xA { 
 			//0xA command: end?
-				if options.IsVerbose {
-					fmt.Fprintf(os.Stderr, "Received All-done\n")
+				if scp.IsVerbose {
+					fmt.Fprintf(errPipe, "Received All-done\n")
 				}
 
 				err = sendByte(cw, 0)
 				if err != nil {
-					fmt.Fprintln(os.Stderr, "Write error: "+err.Error())
+					fmt.Fprintln(errPipe, "Write error: "+err.Error())
 					ce <- err
 					return
 				}
@@ -131,67 +136,74 @@ func scpFromRemote(srcUser, srcHost, srcFile, dstFile string, options ScpOptions
 				if err != nil {
 					if err == io.EOF {
 						//no problem.
-						if options.IsVerbose {
-							fmt.Fprintln(os.Stderr, "Received EOF from remote server")
+						if scp.IsVerbose {
+							fmt.Fprintln(errPipe, "Received EOF from remote server")
 						}
 					} else {
-						fmt.Fprintln(os.Stderr, "Error reading standard input:", err)
+						fmt.Fprintln(errPipe, "Error reading standard input:", err)
 						ce <- err
 					}
 					return
 				}
 				//first line
 				cmdFull := scanner.Text()
-				if options.IsVerbose {
-					fmt.Fprintf(os.Stderr, "Details: %v\n", cmdFull)
+				if scp.IsVerbose {
+					fmt.Fprintf(errPipe, "Details: %v\n", cmdFull)
 				}
 				//remainder, split by spaces
 				parts := strings.SplitN(cmdFull, " ", 3)
 
 				switch cmd {
 				case 0x1:
-					fmt.Fprintf(os.Stderr, "Received error message: %s\n", cmdFull[1:])
+					fmt.Fprintf(errPipe, "Received error message: %s\n", cmdFull[1:])
 					ce <- errors.New(cmdFull[1:])
 					return
 				case 'D','C':
 					mode, err := strconv.ParseInt(parts[0], 8, 32)
 					if err != nil {
-						fmt.Fprintln(os.Stderr, "Format error: "+err.Error())
+						fmt.Fprintln(errPipe, "Format error: "+err.Error())
 						ce <- err
 						return
 					}
 					sizeUint, err := strconv.ParseUint(parts[1], 10, 64)
 					size := int64(sizeUint)
 					if err != nil {
-						fmt.Fprintln(os.Stderr, "Format error: "+err.Error())
+						fmt.Fprintln(errPipe, "Format error: "+err.Error())
 						ce <- err
 						return
 					}
-					filename := parts[2]
-					if options.IsVerbose {
-						fmt.Fprintf(os.Stderr, "Mode: %d, size: %d, filename: %s\n", mode, size, filename)
+					rcvFilename := parts[2]
+					if scp.IsVerbose {
+						fmt.Fprintf(errPipe, "Mode: %d, size: %d, filename: %s\n", mode, size, rcvFilename)
+					}
+					var filename string
+					//use the specified filename from the destination (only for top-level item)
+					if useSpecifiedFilename && first {
+						filename = filepath.Base(dstFile)
+					} else {
+						filename = rcvFilename
 					}
 					err = sendByte(cw, 0)
 					if err != nil {
-						fmt.Fprintln(os.Stderr, "Send error: "+err.Error())
+						fmt.Fprintln(errPipe, "Send error: "+err.Error())
 						ce <- err
 						return
 					}
 					if cmd == 'C' {
 						//C command - file
 						thisDstFile := filepath.Join(dstDir, filename)
-						if options.IsVerbose {
-							fmt.Fprintln(os.Stderr, "Creating destination file: ", thisDstFile)
+						if scp.IsVerbose {
+							fmt.Fprintln(errPipe, "Creating destination file: ", thisDstFile)
 						}
 						tot := int64(0)
-						pb := NewProgressBar(filename, size)
+						pb := NewProgressBarTo(filename, size, outPipe)
 						pb.Update(0)
 
 						//TODO: mode here
 						fw, err := os.Create(thisDstFile)
 						if err != nil {
 							ce <- err
-							fmt.Fprintln(os.Stderr, "File creation error: "+err.Error())
+							fmt.Fprintln(errPipe, "File creation error: "+err.Error())
 							return
 						}
 						defer fw.Close()
@@ -206,7 +218,7 @@ func scpFromRemote(srcUser, srcHost, srcFile, dstFile string, options ScpOptions
 							b := make([]byte, bufferSize)
 							n, err = r.Read(b)
 							if err != nil {
-								fmt.Fprintln(os.Stderr, "Read error: "+err.Error())
+								fmt.Fprintln(errPipe, "Read error: "+err.Error())
 								ce <- err
 								return
 							}
@@ -214,7 +226,7 @@ func scpFromRemote(srcUser, srcHost, srcFile, dstFile string, options ScpOptions
 							//write to file
 							_, err = fw.Write(b[:n])
 							if err != nil {
-								fmt.Fprintln(os.Stderr, "Write error: "+err.Error())
+								fmt.Fprintln(errPipe, "Write error: "+err.Error())
 								ce <- err
 								return
 							}
@@ -227,7 +239,7 @@ func scpFromRemote(srcUser, srcHost, srcFile, dstFile string, options ScpOptions
 						//close file writer & check error
 						err = fw.Close()
 						if err != nil {
-							fmt.Fprintln(os.Stderr, err.Error())
+							fmt.Fprintln(errPipe, err.Error())
 							ce <- err
 							return
 						}
@@ -235,7 +247,7 @@ func scpFromRemote(srcUser, srcHost, srcFile, dstFile string, options ScpOptions
 						nb := make([]byte, 1)
 						_, err = r.Read(nb)
 						if err != nil {
-							println(err.Error())
+							fmt.Fprintln(errPipe, err.Error())
 							ce <- err
 							return
 						}
@@ -243,48 +255,49 @@ func scpFromRemote(srcUser, srcHost, srcFile, dstFile string, options ScpOptions
 						//send null-byte back
 						_, err = cw.Write([]byte{0})
 						if err != nil {
-							fmt.Fprintln(os.Stderr, "Send null-byte error: "+err.Error())
+							fmt.Fprintln(errPipe, "Send null-byte error: "+err.Error())
 							ce <- err
 							return
 						}
 						pb.Update(tot)
-						fmt.Println() //new line
+						fmt.Fprintln(errPipe) //new line
 					} else { 
 						//D command (directory)
 						thisDstFile := filepath.Join(dstDir, filename)
 						fileMode := os.FileMode(uint32(mode))
 						err = os.MkdirAll(thisDstFile, fileMode)
 						if err != nil {
-							fmt.Fprintln(os.Stderr, "Mkdir error: "+err.Error())
-							os.Exit(1)
+							fmt.Fprintln(errPipe, "Mkdir error: "+err.Error())
 							ce <- err
 							return
 						}
 						dstDir = thisDstFile
 					}
 				default:
-					fmt.Fprintf(os.Stderr, "Command '%v' NOT implemented\n", cmd)
+					fmt.Fprintf(errPipe, "Command '%v' NOT implemented\n", cmd)
 					return
 				}
 			}
+			first = false
 		}
 		err = cw.Close()
 		if err != nil {
-			fmt.Fprintln(os.Stderr, "error closing process writer: ", err.Error())
+			fmt.Fprintln(errPipe, "error closing process writer: ", err.Error())
 			ce <- err
 			return
 		}
 	}()
 	remoteOpts := "-f"
-	if options.IsQuiet {
+	if scp.IsQuiet {
 		remoteOpts += "q"
 	}
-	if options.IsRecursive {
+	if scp.IsRecursive {
 		remoteOpts += "r"
 	}
+	//TODO should this path (/usr/bin/scp) be configurable?
 	err = session.Run("/usr/bin/scp " + remoteOpts + " " + srcFile)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "Failed to run remote scp: "+err.Error())
+		fmt.Fprintln(errPipe, "Failed to run remote scp: "+err.Error())
 	}
 	return err
 

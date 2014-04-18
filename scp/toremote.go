@@ -12,8 +12,8 @@ import (
 //	"time"
 )
 
-func processDir(procWriter io.Writer, srcFilePath string, srcFileInfo os.FileInfo, options ScpOptions) error {
-	err := sendDir(procWriter, srcFilePath, srcFileInfo, options)
+func (scp *SecureCopier) processDir(procWriter io.Writer, srcFilePath string, srcFileInfo os.FileInfo, outPipe io.Writer, errPipe io.Writer) error {
+	err := scp.sendDir(procWriter, srcFilePath, srcFileInfo, errPipe)
 	if err != nil {
 		return err
 	}
@@ -27,42 +27,42 @@ func processDir(procWriter io.Writer, srcFilePath string, srcFileInfo os.FileInf
 	}
 	for _, fi := range fis {
 		if fi.IsDir() {
-			err = processDir(procWriter, filepath.Join(srcFilePath, fi.Name()), fi, options)
+			err = scp.processDir(procWriter, filepath.Join(srcFilePath, fi.Name()), fi, outPipe, errPipe)
 			if err != nil {
 				return err
 			}
 		} else {
-			err = sendFile(procWriter, filepath.Join(srcFilePath, fi.Name()), fi, options)
+			err = scp.sendFile(procWriter, filepath.Join(srcFilePath, fi.Name()), fi, outPipe, errPipe)
 			if err != nil {
 				return err
 			}
 		}
 	}
 	//TODO process errors
-	err = sendEndDir(procWriter, options)
+	err = scp.sendEndDir(procWriter, errPipe)
 	return err
 }
 
-func sendEndDir(procWriter io.Writer, options ScpOptions) error {
+func (scp *SecureCopier) sendEndDir(procWriter io.Writer, errPipe io.Writer) error {
 	header := fmt.Sprintf("E\n")
-	if options.IsVerbose {
-		fmt.Fprintf(os.Stderr, "Sending end dir: %s", header)
+	if scp.IsVerbose {
+		fmt.Fprintf(errPipe, "Sending end dir: %s", header)
 	}
 	_, err := procWriter.Write([]byte(header))
 	return err
 }
 
-func sendDir(procWriter io.Writer, srcPath string, srcFileInfo os.FileInfo, options ScpOptions) error {
+func (scp *SecureCopier) sendDir(procWriter io.Writer, srcPath string, srcFileInfo os.FileInfo, errPipe io.Writer) error {
 	mode := uint32(srcFileInfo.Mode().Perm())
 	header := fmt.Sprintf("D%04o 0 %s\n", mode, filepath.Base(srcPath))
-	if options.IsVerbose {
-		fmt.Fprintf(os.Stderr, "Sending Dir header : %s", header)
+	if scp.IsVerbose {
+		fmt.Fprintf(errPipe, "Sending Dir header : %s", header)
 	}
 	_, err := procWriter.Write([]byte(header))
 	return err
 }
 
-func sendFile(procWriter io.Writer, srcPath string, srcFileInfo os.FileInfo, options ScpOptions) error {
+func (scp *SecureCopier) sendFile(procWriter io.Writer, srcPath string, srcFileInfo os.FileInfo, outPipe io.Writer, errPipe io.Writer) error {
 	//single file
 	mode := uint32(srcFileInfo.Mode().Perm())
 	fileReader, err := os.Open(srcPath)
@@ -72,10 +72,10 @@ func sendFile(procWriter io.Writer, srcPath string, srcFileInfo os.FileInfo, opt
 	defer fileReader.Close()
 	size := srcFileInfo.Size()
 	header := fmt.Sprintf("C%04o %d %s\n", mode, size, filepath.Base(srcPath))
-	if options.IsVerbose {
-		fmt.Fprintf(os.Stderr, "Sending File header: %s", header)
+	if scp.IsVerbose {
+		fmt.Fprintf(errPipe, "Sending File header: %s", header)
 	}
-	pb := NewProgressBar(srcPath, size)
+	pb := NewProgressBarTo(srcPath, size, outPipe)
 	pb.Update(0)
 	_, err = procWriter.Write([]byte(header))
 	if err != nil {
@@ -93,31 +93,31 @@ func sendFile(procWriter io.Writer, srcPath string, srcFileInfo os.FileInfo, opt
 	}
 
 	err = fileReader.Close()
-	if options.IsVerbose {
-		fmt.Fprintln(os.Stderr, "Sent file plus null-byte.")
+	if scp.IsVerbose {
+		fmt.Fprintln(errPipe, "Sent file plus null-byte.")
 	}
 	pb.Update(size)
-	fmt.Println()
+	fmt.Fprintln(errPipe)
 
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err.Error())
+		fmt.Fprintln(errPipe, err.Error())
 	}
 	return err
 }
 
 //to-scp
-func scpToRemote(srcFile, dstUser, dstHost, dstFile string, options ScpOptions) error {
+func (scp *SecureCopier) scpToRemote(srcFile, dstUser, dstHost, dstFile string, outPipe io.Writer, errPipe io.Writer) error {
 
 	srcFileInfo, err := os.Stat(srcFile)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "Could not stat source file "+srcFile)
+		fmt.Fprintln(errPipe, "Could not stat source file "+srcFile)
 		return err
 	}
-	session, err := sshconn.Connect(dstUser, dstHost, options.Port, options.KeyFile, options.IsCheckKnownHosts, options.IsVerbose)
+	session, err := sshconn.Connect(dstUser, dstHost, scp.Port, scp.KeyFile, scp.IsCheckKnownHosts, scp.IsVerbose, errPipe)
 	if err != nil {
 		return err
-	} else if options.IsVerbose {
-		fmt.Fprintln(os.Stderr, "Got session")
+	} else if scp.IsVerbose {
+		fmt.Fprintln(errPipe, "Got session")
 	}
 	defer session.Close()
 	ce := make(chan error)
@@ -128,22 +128,22 @@ func scpToRemote(srcFile, dstUser, dstHost, dstFile string, options ScpOptions) 
 	go func() {
 		procWriter, err := session.StdinPipe()
 		if err != nil {
-			fmt.Fprintln(os.Stderr, err.Error())
+			fmt.Fprintln(errPipe, err.Error())
 			ce <- err
 			return
 		}
 		defer procWriter.Close()
-		if options.IsRecursive {
+		if scp.IsRecursive {
 			if srcFileInfo.IsDir() {
-				err = processDir(procWriter, srcFile, srcFileInfo, options)
+				err = scp.processDir(procWriter, srcFile, srcFileInfo, outPipe, errPipe)
 				if err != nil {
-					fmt.Fprintln(os.Stderr, err.Error())
+					fmt.Fprintln(errPipe, err.Error())
 					ce <- err
 				}
 			} else {
-				err = sendFile(procWriter, srcFile, srcFileInfo, options)
+				err = scp.sendFile(procWriter, srcFile, srcFileInfo, outPipe, errPipe)
 				if err != nil {
-					fmt.Fprintln(os.Stderr, err.Error())
+					fmt.Fprintln(errPipe, err.Error())
 					ce <- err
 				}
 			}
@@ -152,16 +152,16 @@ func scpToRemote(srcFile, dstUser, dstHost, dstFile string, options ScpOptions) 
 				ce <- errors.New("Error: Not a regular file")
 				return
 			} else {
-				err = sendFile(procWriter, srcFile, srcFileInfo, options)
+				err = scp.sendFile(procWriter, srcFile, srcFileInfo, outPipe, errPipe)
 				if err != nil {
-					fmt.Fprintln(os.Stderr, err.Error())
+					fmt.Fprintln(errPipe, err.Error())
 					ce <- err
 				}
 			}
 		}
 		err = procWriter.Close()
 		if err != nil {
-			fmt.Fprintln(os.Stderr, err.Error())
+			fmt.Fprintln(errPipe, err.Error())
 			ce <- err
 			return
 		}
@@ -169,21 +169,21 @@ func scpToRemote(srcFile, dstUser, dstHost, dstFile string, options ScpOptions) 
 	go func() {
 		select {
 		case err, ok := <-ce:
-			fmt.Fprintln(os.Stderr, "Error:", err, ok)
+			fmt.Fprintln(errPipe, "Error:", err, ok)
 			os.Exit(1)
 		}
 	}()
 
 	remoteOpts := "-t"
-	if options.IsQuiet {
+	if scp.IsQuiet {
 		remoteOpts += "q"
 	}
-	if options.IsRecursive {
+	if scp.IsRecursive {
 		remoteOpts += "r"
 	}
 	err = session.Run("/usr/bin/scp " + remoteOpts + " " + dstFile)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "Failed to run remote scp: "+err.Error())
+		fmt.Fprintln(errPipe, "Failed to run remote scp: "+err.Error())
 	}
 	return err
 }

@@ -7,9 +7,16 @@ import (
 )
 
 func main() {
-	err := scp.Scp(os.Args)
+	scper := new(scp.SecureCopier)
+	err := scper.ParseFlags(os.Args, os.Stderr)
 	if err != nil {
-		fmt.Printf("Error: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
+	err = scper.Exec(os.Stdin, os.Stdout, os.Stderr)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+
 }
