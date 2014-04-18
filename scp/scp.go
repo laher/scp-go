@@ -156,3 +156,16 @@ func sendByte(w io.Writer, val byte) error {
 	return err
 }
 
+
+func ScpCli(args []string) (error, int) {
+	scper := new(SecureCopier)
+	err, status := scper.ParseFlags(args, os.Stderr)
+	if err != nil {
+		return err, status
+	}
+	err, status = scper.Exec(os.Stdin, os.Stdout, os.Stderr)
+	return err, status
+
+
+}
+
